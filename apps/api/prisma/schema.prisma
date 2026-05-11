@@ -1,0 +1,478 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  ACCOUNTANT
+  VIEWER
+  AI_AGENT
+}
+
+enum VatStatus {
+  NOT_REGISTERED
+  REGISTERED
+  CANCELLED
+}
+
+enum DocumentType {
+  QUOTATION
+  DELIVERY_NOTE
+  INVOICE
+  RECEIPT
+  TAX_INVOICE
+  RECEIPT_TAX_INVOICE
+  PURCHASE
+  EXPENSE
+  WHT_CERTIFICATE
+  BANK_STATEMENT
+}
+
+enum NumberingResetPolicy {
+  YEARLY
+  NEVER
+}
+
+enum DocumentStatus {
+  DRAFT
+  AI_EXTRACTED
+  PENDING_REVIEW
+  USER_CONFIRMED
+  ACCOUNTED
+  PENDING_ACCOUNTANT
+  ACCOUNTANT_APPROVED
+  LOCKED
+  VOIDED
+}
+
+enum PartnerType {
+  CUSTOMER
+  VENDOR
+  BOTH
+}
+
+enum ProductType {
+  GOOD
+  SERVICE
+  MATERIAL
+  ASSET
+}
+
+enum AttachmentTargetType {
+  SALES_DOCUMENT
+  PURCHASE_DOCUMENT
+  PAYMENT
+  EXPENSE
+  OTHER
+}
+
+enum ExpenseReceiptStatus {
+  UPLOADED
+  PENDING_VENDOR_APPROVAL
+  READY_TO_ACCOUNT
+  ACCOUNTED
+  REJECTED
+}
+
+enum ExpenseRecordStatus {
+  RECORDED
+  VOIDED
+}
+
+model Company {
+  id               String    @id @default(cuid())
+  nameTh           String
+  nameEn           String?
+  taxId            String    @unique
+  address          String    @db.Text
+  phone            String?
+  email            String?
+  brandShort       String?
+  tagline          String?
+  registeredAt     DateTime
+  vatEffectiveDate DateTime?
+  capital          Decimal?  @db.Decimal(18, 2)
+
+  vatStatuses        CompanyVatStatus[]
+  users              User[]
+  auditLogs          AuditLog[]
+  numberingRules     DocumentNumberingRule[]
+  numberingCounters  DocumentNumberingCounter[]
+  partners           Partner[]
+  products           Product[]
+  salesDocuments     SalesDocument[]
+  expenseReceipts    ExpenseReceipt[]
+  expenseRecords     ExpenseRecord[]
+  attachments        Attachment[]
+  generatedPdfs      GeneratedPdf[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CompanyVatStatus {
+  id            String    @id @default(cuid())
+  companyId     String
+  status        VatStatus
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  reason        String?   @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, effectiveFrom])
+}
+
+model User {
+  id           String  @id @default(cuid())
+  companyId    String
+  email        String  @unique
+  passwordHash String
+  fullName     String
+  initial      String?
+  role         Role
+  isActive     Boolean @default(true)
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  auditLogs AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model AuditLog {
+  id         String  @id @default(cuid())
+  companyId  String
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  reason     String? @db.Text
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String? @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action])
+}
+
+model DocumentNumberingRule {
+  id          String                @id @default(cuid())
+  companyId   String
+  type        DocumentType
+  prefix      String                @db.VarChar(8)
+  padding     Int                   @default(4)
+  resetPolicy NumberingResetPolicy  @default(YEARLY)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, type])
+}
+
+model DocumentNumberingCounter {
+  id           String       @id @default(cuid())
+  companyId    String
+  type         DocumentType
+  beYear       Int
+  currentValue Int          @default(0)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, type, beYear])
+  @@index([companyId, type, beYear])
+}
+
+model Partner {
+  id          String      @id @default(cuid())
+  companyId   String
+  type        PartnerType @default(CUSTOMER)
+  code        String?     @db.VarChar(32)
+  nameTh      String      @db.VarChar(200)
+  nameEn      String?     @db.VarChar(200)
+  taxId       String?     @db.VarChar(20)
+  branch      String?     @db.VarChar(50)
+  address     String?     @db.Text
+  phone       String?     @db.VarChar(50)
+  email       String?     @db.VarChar(120)
+  website     String?     @db.VarChar(200)
+  note        String?     @db.Text
+  isActive    Boolean     @default(true)
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contacts PartnerContact[]
+  asCustomerSalesDocs SalesDocument[] @relation("SalesDocumentCustomer")
+  asVendorExpenseReceipts ExpenseReceipt[] @relation("ExpenseReceiptVendor")
+  asVendorExpenseRecords  ExpenseRecord[]  @relation("ExpenseRecordVendor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, type, isActive])
+  @@index([companyId, taxId])
+}
+
+model PartnerContact {
+  id        String  @id @default(cuid())
+  partnerId String
+  name      String  @db.VarChar(200)
+  position  String? @db.VarChar(100)
+  phone     String? @db.VarChar(50)
+  email     String? @db.VarChar(120)
+  isPrimary Boolean @default(false)
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId])
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  companyId   String
+  type        ProductType @default(SERVICE)
+  code        String?     @db.VarChar(32)
+  nameTh      String      @db.VarChar(200)
+  nameEn      String?     @db.VarChar(200)
+  description String?     @db.Text
+  unit        String      @db.VarChar(32)
+  unitPrice   Decimal     @db.Decimal(18, 2)
+  vatable     Boolean     @default(true)
+  isActive    Boolean     @default(true)
+
+  company  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  salesItems SalesDocumentItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, type, isActive])
+}
+
+model SalesDocument {
+  id              String         @id @default(cuid())
+  companyId       String
+  type            DocumentType
+  number          String         @db.VarChar(40)
+  beYear          Int
+  status          DocumentStatus @default(DRAFT)
+
+  customerId      String
+  projectId       String?
+
+  parentDocumentId String?
+  parentDocument   SalesDocument?  @relation("SalesDocumentChain", fields: [parentDocumentId], references: [id])
+  childDocuments   SalesDocument[] @relation("SalesDocumentChain")
+
+  documentDate    DateTime
+  dueDate         DateTime?
+  reference       String?        @db.VarChar(100)
+  note            String?        @db.Text
+
+  customerSnapshotName    String  @db.VarChar(200)
+  customerSnapshotAddress String? @db.Text
+  customerSnapshotTaxId   String? @db.VarChar(20)
+  customerSnapshotBranch  String? @db.VarChar(50)
+
+  subtotal       Decimal @db.Decimal(18, 2) @default(0)
+  vatRate        Decimal @db.Decimal(5, 2)  @default(7)
+  vatAmount      Decimal @db.Decimal(18, 2) @default(0)
+  totalAfterVat  Decimal @db.Decimal(18, 2) @default(0)
+  whtRate        Decimal @db.Decimal(5, 2)  @default(0)
+  whtAmount      Decimal @db.Decimal(18, 2) @default(0)
+  grandTotal     Decimal @db.Decimal(18, 2) @default(0)
+  netReceived    Decimal @db.Decimal(18, 2) @default(0)
+
+  confirmedAt DateTime?
+  confirmedBy String?
+  voidedAt    DateTime?
+  voidedBy    String?
+  voidReason  String?   @db.Text
+  lockedAt    DateTime?
+  lockedBy    String?
+
+  pdfPath        String?   @db.VarChar(500)
+  pdfGeneratedAt DateTime?
+  pdfGeneratedBy String?
+
+  company  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Partner             @relation("SalesDocumentCustomer", fields: [customerId], references: [id])
+  items    SalesDocumentItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String?
+
+  @@unique([companyId, type, number])
+  @@index([companyId, type, status, documentDate])
+  @@index([companyId, customerId])
+  @@index([companyId, status])
+  @@index([beYear, type])
+}
+
+model SalesDocumentItem {
+  id              String  @id @default(cuid())
+  salesDocumentId String
+  productId       String?
+  lineNumber      Int
+
+  productCode  String? @db.VarChar(32)
+  description  String  @db.Text
+  unit         String  @db.VarChar(32)
+  quantity     Decimal @db.Decimal(18, 4)
+  unitPrice    Decimal @db.Decimal(18, 2)
+  discount     Decimal @db.Decimal(18, 2) @default(0)
+  lineTotal    Decimal @db.Decimal(18, 2)
+  vatable      Boolean @default(true)
+
+  salesDocument SalesDocument @relation(fields: [salesDocumentId], references: [id], onDelete: Cascade)
+  product       Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([salesDocumentId, lineNumber])
+  @@index([salesDocumentId])
+}
+
+model Attachment {
+  id          String                @id @default(cuid())
+  companyId   String
+  targetType  AttachmentTargetType
+  targetId    String
+  fileName    String                @db.VarChar(300)
+  storedPath  String                @db.VarChar(500)
+  mimeType    String                @db.VarChar(100)
+  sizeBytes   Int
+  sha256      String?               @db.VarChar(64)
+  uploadedBy  String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, targetType, targetId])
+  @@index([sha256])
+}
+
+model ExpenseReceipt {
+  id        String               @id @default(cuid())
+  companyId String
+  status    ExpenseReceiptStatus @default(UPLOADED)
+
+  vendorId String?
+  vendor   Partner? @relation("ExpenseReceiptVendor", fields: [vendorId], references: [id])
+
+  proposedVendorName    String? @db.VarChar(200)
+  proposedVendorTaxId   String? @db.VarChar(20)
+  proposedVendorBranch  String? @db.VarChar(50)
+  proposedVendorAddress String? @db.Text
+
+  documentNumber String?   @db.VarChar(100)
+  documentDate   DateTime?
+  paidAt         DateTime?
+  category       String?   @db.VarChar(100)
+  note           String?   @db.Text
+
+  subtotal      Decimal @db.Decimal(18, 2) @default(0)
+  vatAmount     Decimal @db.Decimal(18, 2) @default(0)
+  withholdingTaxAmount Decimal @db.Decimal(18, 2) @default(0)
+  grandTotal    Decimal @db.Decimal(18, 2) @default(0)
+
+  originalFileName String @db.VarChar(300)
+  storedPath       String @db.VarChar(500)
+  mimeType         String @db.VarChar(100)
+  sizeBytes        Int
+  sha256           String? @db.VarChar(64)
+
+  uploadedBy  String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  accountedBy String?
+  accountedAt DateTime?
+  rejectReason String? @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  expenseRecord ExpenseRecord?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status, createdAt])
+  @@index([companyId, vendorId])
+  @@index([companyId, proposedVendorTaxId])
+  @@index([sha256])
+}
+
+model ExpenseRecord {
+  id        String              @id @default(cuid())
+  companyId String
+  receiptId String              @unique
+  vendorId  String
+  status    ExpenseRecordStatus @default(RECORDED)
+
+  expenseDate    DateTime
+  documentNumber String? @db.VarChar(100)
+  category       String? @db.VarChar(100)
+  note           String? @db.Text
+
+  subtotal      Decimal @db.Decimal(18, 2) @default(0)
+  vatAmount     Decimal @db.Decimal(18, 2) @default(0)
+  withholdingTaxAmount Decimal @db.Decimal(18, 2) @default(0)
+  grandTotal    Decimal @db.Decimal(18, 2) @default(0)
+
+  recordedBy String?
+  recordedAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  receipt ExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  vendor  Partner        @relation("ExpenseRecordVendor", fields: [vendorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, vendorId, expenseDate])
+  @@index([companyId, status, expenseDate])
+}
+
+model GeneratedPdf {
+  id              String       @id @default(cuid())
+  companyId       String
+  documentType    DocumentType
+  documentId      String
+  storedPath      String       @db.VarChar(500)
+  sizeBytes       Int
+  isPreview       Boolean      @default(false)
+  dataVersion     Int          @default(1)
+  generatedBy     String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, documentType, documentId])
+}

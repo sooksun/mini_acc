@@ -1,0 +1,29 @@
+{
+  "name": "hj-account-ai",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "build:types": "pnpm --filter @hj/shared-types build",
+    "prisma:generate": "pnpm --filter @hj/api run prisma:generate",
+    "predev": "pnpm build:types && pnpm prisma:generate",
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm build:types && pnpm prisma:generate && pnpm --filter @hj/api build && pnpm --filter @hj/web build",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:up": "docker compose up -d db redis",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f db",
+    "db:migrate": "pnpm --filter @hj/api run prisma:migrate",
+    "db:seed": "pnpm --filter @hj/api run prisma:seed",
+    "db:studio": "pnpm --filter @hj/api run prisma:studio",
+    "api:dev": "pnpm --filter @hj/api run dev",
+    "web:dev": "pnpm --filter @hj/web run dev"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  }
+}
