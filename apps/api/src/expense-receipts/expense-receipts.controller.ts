@@ -2,7 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  NotFoundException,
   Param,
   Post,
   Query,
@@ -12,7 +11,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import * as fs from 'node:fs/promises';
 import type { Response } from 'express';
 import type { AuthUser } from '@hj/shared-types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -56,14 +54,8 @@ export class ExpenseReceiptsController {
     @Param('id') id: string,
     @Res() res: Response,
   ) {
-    const { storedPath, originalFileName, mimeType } =
-      await this.expenseReceipts.openStoredFile(user.companyId, id);
-    let buffer: Buffer;
-    try {
-      buffer = await fs.readFile(storedPath);
-    } catch {
-      throw new NotFoundException('ไฟล์ใบเสร็จไม่พบบนเครื่องเก็บข้อมูล');
-    }
+    const { buffer, originalFileName, mimeType } =
+      await this.expenseReceipts.readStoredFile(user.companyId, id);
     const safeName = originalFileName.replace(/[\r\n"]/g, '_');
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);

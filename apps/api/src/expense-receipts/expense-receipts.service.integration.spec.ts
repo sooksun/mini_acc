@@ -151,6 +151,7 @@ describe('ExpenseReceiptsService (integration)', () => {
         {
           vendorTaxId: vendor.taxId!,
           subtotal: '100',
+          vatAmount: '7',
           grandTotal: '107',
           paidAt: '2026-05-01T00:00:00+07:00',
         },
@@ -250,6 +251,10 @@ describe('ExpenseReceiptsService (integration)', () => {
         env.seed.userId,
         {
           vendorTaxId: vendor.taxId!,
+          // amounts must reconcile (H3): subtotal + vat − wht = grandTotal
+          subtotal: '321',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
           grandTotal: '321',
           documentDate: '2026-04-15T00:00:00+07:00',
         },
@@ -264,6 +269,152 @@ describe('ExpenseReceiptsService (integration)', () => {
       );
       expect(accounted.status).toBe('ACCOUNTED');
       expect(accounted.expenseRecord?.grandTotal).toBe('321');
+    });
+  });
+
+  describe('account() — H3 amount consistency', () => {
+    it('refuses when subtotal + vat − wht does not match grandTotal (off by > 0.01)', async () => {
+      const vendor = await makeVendor('ผู้ขายตัวเลขขัด', '0000000020001');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '100.00',
+          vatAmount: '7.00',
+          withholdingTaxAmount: '0',
+          grandTotal: '200.00', // ≠ 100 + 7 − 0 = 107
+          paidAt: '2026-05-01',
+        },
+        fakePdf('h3-bad.pdf', 'h3-bad-1'),
+      );
+
+      await expect(
+        service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'AMOUNT_INCONSISTENT',
+          expectedGrandTotal: '107',
+          actualGrandTotal: '200',
+        }),
+      });
+    });
+
+    it('accepts when amounts reconcile exactly', async () => {
+      const vendor = await makeVendor('ผู้ขายตัวเลขถูก', '0000000020002');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '100.00',
+          vatAmount: '7.00',
+          withholdingTaxAmount: '3.00',
+          grandTotal: '104.00', // 100 + 7 − 3
+          paidAt: '2026-05-01',
+        },
+        fakePdf('h3-ok.pdf', 'h3-ok-1'),
+      );
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      expect(accounted.status).toBe('ACCOUNTED');
+    });
+
+    it('tolerates 0.01 rounding difference', async () => {
+      const vendor = await makeVendor('ผู้ขาย rounding', '0000000020003');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '100.00',
+          vatAmount: '7.00',
+          withholdingTaxAmount: '0',
+          grandTotal: '107.01', // off by exactly 0.01 — within tolerance
+          paidAt: '2026-05-01',
+        },
+        fakePdf('h3-round.pdf', 'h3-round-1'),
+      );
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      expect(accounted.status).toBe('ACCOUNTED');
+    });
+  });
+
+  describe('findVendorCandidate — M4 normalize whitespace + case', () => {
+    it('matches stored vendor when input has extra whitespace', async () => {
+      await env.prisma.partner.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'VENDOR',
+          nameTh: 'บริษัท ก จำกัด',
+          taxId: '0000000030001',
+        },
+      });
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        { vendorName: 'บริษัท  ก   จำกัด' }, // double + triple spaces
+        fakePdf('m4-ws.pdf', 'm4-ws-1'),
+      );
+      expect(receipt.status).toBe('READY_TO_ACCOUNT');
+      expect(receipt.vendor?.taxId).toBe('0000000030001');
+    });
+
+    it('matches with mixed case (utf8mb4_unicode_ci handles English letters)', async () => {
+      await env.prisma.partner.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'VENDOR',
+          nameTh: 'Acme Co., Ltd.',
+          taxId: '0000000030002',
+        },
+      });
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        { vendorName: 'acme  co., ltd.' },
+        fakePdf('m4-case.pdf', 'm4-case-1'),
+      );
+      expect(receipt.status).toBe('READY_TO_ACCOUNT');
+      expect(receipt.vendor?.taxId).toBe('0000000030002');
+    });
+  });
+
+  describe('approveVendor — M8 P2002 → 409', () => {
+    it('returns 409 ConflictException when vendor code collides', async () => {
+      // existing vendor with code = "ACME"
+      await env.prisma.partner.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'VENDOR',
+          code: 'ACME',
+          nameTh: 'ผู้ขาย ACME เดิม',
+          taxId: '0000000040001',
+        },
+      });
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        { vendorName: 'ผู้ขายชื่อใหม่', vendorTaxId: '0000000040002' },
+        fakePdf('m8.pdf', 'm8-1'),
+      );
+
+      await expect(
+        service.approveVendor(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id, {
+          code: 'ACME', // collide on (companyId, code) unique
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'VENDOR_CONSTRAINT_CONFLICT' }),
+      });
     });
   });
 

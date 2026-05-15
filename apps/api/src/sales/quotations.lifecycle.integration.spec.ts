@@ -161,7 +161,12 @@ describe('Quotation lifecycle (integration)', () => {
   });
 
   it('numbering is sequential across confirms (QT-2569-0001 then 0002 then 0003)', async () => {
-    // bootstrap fresh to reset counter
+    // bootstrap fresh: prior tests in this suite create real QT-2569-xxxx rows,
+    // and resetting the counter alone would make the next allocate collide with
+    // those rows on the (companyId, type, number) unique key. Clear both.
+    await env.prisma.salesDocument.deleteMany({
+      where: { companyId: env.seed.companyId, type: 'QUOTATION' },
+    });
     await env.prisma.documentNumberingCounter.deleteMany({
       where: { companyId: env.seed.companyId, type: 'QUOTATION' },
     });

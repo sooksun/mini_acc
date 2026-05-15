@@ -9,8 +9,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
-import { mkdir, unlink, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
+import { isAbsolute, join } from 'path';
 import type { Role } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadExpenseReceiptDto } from './dto/upload-expense-receipt.dto';
@@ -92,7 +92,7 @@ export class ExpenseReceiptsService {
     // C4: write file to disk only if we commit the receipt; clean up otherwise.
     // We persist the file *before* the tx so the row can reference its path, but
     // if the tx throws we unlink the orphan in finally.
-    const storedPath = await this.persistFile(companyId, file);
+    const { relativePath, absolutePath } = await this.persistFile(companyId, file);
     let committed = false;
     try {
       const receipt = await this.prisma.$transaction(async (tx) => {
@@ -117,7 +117,7 @@ export class ExpenseReceiptsService {
             withholdingTaxAmount: this.money(dto.withholdingTaxAmount),
             grandTotal: this.money(dto.grandTotal),
             originalFileName: file.originalname,
-            storedPath,
+            storedPath: relativePath,
             mimeType: file.mimetype,
             sizeBytes: file.size,
             sha256,
@@ -131,7 +131,7 @@ export class ExpenseReceiptsService {
             targetType: 'EXPENSE',
             targetId: created.id,
             fileName: file.originalname,
-            storedPath,
+            storedPath: relativePath,
             mimeType: file.mimetype,
             sizeBytes: file.size,
             sha256,
@@ -146,9 +146,9 @@ export class ExpenseReceiptsService {
       return this.findOne(companyId, receipt.id);
     } finally {
       if (!committed) {
-        await unlink(storedPath).catch((err) => {
+        await unlink(absolutePath).catch((err) => {
           this.logger.error(
-            `Failed to unlink orphan upload after tx rollback: path=${storedPath} err=${err instanceof Error ? err.message : String(err)}`,
+            `Failed to unlink orphan upload after tx rollback: path=${absolutePath} err=${err instanceof Error ? err.message : String(err)}`,
           );
         });
       }
@@ -256,18 +256,43 @@ export class ExpenseReceiptsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const vendor = await tx.partner.create({
-        data: {
-          companyId,
-          type: 'VENDOR',
-          code,
-          nameTh,
-          taxId,
-          branch,
-          address,
-          note: `สร้างจากใบเสร็จรายจ่าย ${receipt.documentNumber ?? receipt.originalFileName}`,
-        },
-      });
+      let vendor;
+      try {
+        vendor = await tx.partner.create({
+          data: {
+            companyId,
+            type: 'VENDOR',
+            code,
+            nameTh,
+            taxId,
+            branch,
+            address,
+            note: `สร้างจากใบเสร็จรายจ่าย ${receipt.documentNumber ?? receipt.originalFileName}`,
+          },
+        });
+      } catch (err) {
+        // M8: a P2002 here means another concurrent flow created a partner
+        // with the same (companyId, code) while we were past our collision
+        // pre-check. Translate to a 409 the frontend can surface instead of
+        // a 500.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+          // On MySQL Prisma surfaces `meta.target` as a string ("PRIMARY", "Partner_companyId_code_key");
+          // on PostgreSQL it's a string[]. Normalize either shape for the error payload.
+          const target = err.meta?.target;
+          const targetLabel = Array.isArray(target)
+            ? target.join(', ')
+            : typeof target === 'string'
+              ? target
+              : 'unique constraint';
+          throw new ConflictException({
+            statusCode: 409,
+            code: 'VENDOR_CONSTRAINT_CONFLICT',
+            message: `สร้างผู้ขายไม่สำเร็จ — มีผู้ขายที่ใช้ค่านี้แล้ว (${targetLabel})`,
+            target: target ?? null,
+          });
+        }
+        throw err;
+      }
 
       return tx.expenseReceipt.update({
         where: { id },
@@ -311,6 +336,23 @@ export class ExpenseReceiptsService {
         statusCode: 422,
         code: 'EXPENSE_DATE_REQUIRED',
         message: 'ต้องระบุวันที่จ่ายหรือวันที่เอกสารก่อนลงรายจ่าย',
+      });
+    }
+
+    // H3: subtotal + VAT − WHT must reconcile with grandTotal (±0.01 baht for
+    // rounding). Without this, ใบเสร็จที่ลงบัญชีอาจมีตัวเลขขัดกัน — ทำลาย invariant
+    // "Report → Journal → Source Document" ใน PRD §7.2.
+    const expectedGrand = receipt.subtotal
+      .plus(receipt.vatAmount)
+      .minus(receipt.withholdingTaxAmount);
+    const diff = receipt.grandTotal.minus(expectedGrand).abs();
+    if (diff.gt(new Prisma.Decimal('0.01'))) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'AMOUNT_INCONSISTENT',
+        message: `ยอดรวมไม่สอดคล้องกัน: subtotal (${receipt.subtotal}) + VAT (${receipt.vatAmount}) − WHT (${receipt.withholdingTaxAmount}) = ${expectedGrand} แต่ grandTotal = ${receipt.grandTotal}`,
+        expectedGrandTotal: expectedGrand.toString(),
+        actualGrandTotal: receipt.grandTotal.toString(),
       });
     }
 
@@ -363,13 +405,20 @@ export class ExpenseReceiptsService {
     return this.toDto(updated);
   }
 
-  async openStoredFile(companyId: string, id: string) {
+  async readStoredFile(companyId: string, id: string) {
     const receipt = await this.prisma.expenseReceipt.findFirst({
       where: { id, companyId },
       select: { storedPath: true, originalFileName: true, mimeType: true },
     });
     if (!receipt) throw new NotFoundException('Expense receipt not found');
-    return receipt;
+
+    const absolutePath = this.resolveStoredPath(receipt.storedPath);
+    try {
+      const buffer = await readFile(absolutePath);
+      return { buffer, originalFileName: receipt.originalFileName, mimeType: receipt.mimeType };
+    } catch {
+      throw new NotFoundException('ไฟล์ใบเสร็จไม่พบบนเครื่องเก็บข้อมูล');
+    }
   }
 
   private async findVendorCandidate(companyId: string, taxId?: string, name?: string) {
@@ -386,17 +435,42 @@ export class ExpenseReceiptsService {
       if (byTaxId) return byTaxId;
     }
 
-    const cleanName = this.blankToNull(name);
+    // M4: collapse runs of whitespace so "บริษัท  ก  จำกัด" matches "บริษัท ก จำกัด".
+    // MySQL utf8mb4_unicode_ci is already case-insensitive at column level, so case
+    // doesn't need a Prisma `mode` toggle. We then scan candidates whose normalized
+    // name matches the normalized input. If the dataset grows this should switch
+    // to a stored normalized column with an index.
+    const cleanName = this.normalizeName(name);
     if (!cleanName) return null;
 
-    return this.prisma.partner.findFirst({
+    const candidates = await this.prisma.partner.findMany({
       where: {
         companyId,
-        nameTh: cleanName,
         isActive: true,
         OR: [{ type: 'VENDOR' }, { type: 'BOTH' }],
       },
+      select: {
+        id: true,
+        code: true,
+        nameTh: true,
+        taxId: true,
+        branch: true,
+        address: true,
+        type: true,
+      },
     });
+    const normalizedInput = cleanName.toLocaleLowerCase('th-TH');
+    return (
+      candidates.find(
+        (p) => this.normalizeName(p.nameTh)?.toLocaleLowerCase('th-TH') === normalizedInput,
+      ) ?? null
+    );
+  }
+
+  /** Trim + collapse runs of whitespace. Returns null on empty input. */
+  private normalizeName(value?: string | null): string | null {
+    const trimmed = value?.trim().replace(/\s+/g, ' ');
+    return trimmed ? trimmed : null;
   }
 
   private async requireVendor(companyId: string, vendorId: string) {
@@ -412,17 +486,39 @@ export class ExpenseReceiptsService {
     return vendor;
   }
 
+  /**
+   * Write file to disk. Returns:
+   *  - `relativePath` to store in DB (portable across storage roots)
+   *  - `absolutePath` for the caller's unlink-on-rollback finally block
+   *
+   * M2: storing relative paths means moving ATTACHMENT_DIR doesn't invalidate
+   * every receipt row in the DB.
+   */
   private async persistFile(companyId: string, file: UploadFile) {
-    // H8: read ATTACHMENT_DIR (the env var actually declared in .env.example), not the
-    // ad-hoc FILE_STORAGE_ROOT the old code expected.
-    const root = this.config.get<string>('ATTACHMENT_DIR') ?? join(process.cwd(), 'var', 'attachments');
-    const dir = join(root, 'expense-receipts', companyId);
-    await mkdir(dir, { recursive: true });
+    const dirRelative = join('expense-receipts', companyId);
+    const dirAbsolute = join(this.getStorageRoot(), dirRelative);
+    await mkdir(dirAbsolute, { recursive: true });
     const ext = this.extensionFor(file.mimetype);
     const filename = `${new Date().toISOString().slice(0, 10)}-${randomUUID()}${ext}`;
-    const storedPath = join(dir, filename);
-    await writeFile(storedPath, file.buffer);
-    return storedPath;
+    const relativePath = join(dirRelative, filename);
+    const absolutePath = join(dirAbsolute, filename);
+    await writeFile(absolutePath, file.buffer);
+    return { relativePath, absolutePath };
+  }
+
+  private getStorageRoot(): string {
+    // H8: ATTACHMENT_DIR is the env var actually declared in .env.example.
+    return this.config.get<string>('ATTACHMENT_DIR') ?? join(process.cwd(), 'var', 'attachments');
+  }
+
+  /**
+   * Resolve a DB-stored path back to an absolute filesystem path.
+   * Backward-compat: rows written before M2 may have stored absolute paths —
+   * return those as-is so old receipts are still readable.
+   */
+  private resolveStoredPath(stored: string): string {
+    if (isAbsolute(stored)) return stored;
+    return join(this.getStorageRoot(), stored);
   }
 
   private extensionFor(mimeType: string) {
