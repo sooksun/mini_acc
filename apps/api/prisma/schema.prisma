@@ -85,6 +85,131 @@ enum ExpenseRecordStatus {
   VOIDED
 }
 
+enum PaymentDirection {
+  IN
+  OUT
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+  CREDIT_CARD
+  PROMPT_PAY
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  VOIDED
+}
+
+enum AccountingPeriodStatus {
+  OPEN
+  CLOSING
+  LOCKED
+  REOPENED
+}
+
+enum JournalSourceType {
+  SALES_DOCUMENT
+  EXPENSE_RECORD
+  PAYMENT
+  INVENTORY_MOVEMENT
+  FIXED_ASSET
+  MANUAL
+  ADJUSTMENT
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
+enum VatRecordType {
+  OUTPUT
+  INPUT
+}
+
+enum WhtRecordType {
+  PAYABLE
+  RECEIVABLE
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskItemType {
+  MISSING_DOCUMENT
+  DUPLICATE_DOCUMENT
+  VAT_RISK
+  WHT_RISK
+  UNMATCHED_BANK
+  LOW_PROFIT_PROJECT
+  STOCK_NEGATIVE
+  EXPENSE_WITHOUT_APPROVAL
+  EDIT_AFTER_CONFIRM
+  TAX_ID_MISSING
+  PDF_GENERATION_ERROR
+}
+
+enum RiskItemStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  ACCEPTED_RISK
+  DISMISSED
+}
+
+enum AiSuggestionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  OVERRIDDEN
+}
+
+enum AiSuggestionType {
+  DOCUMENT_EXTRACT
+  ACCOUNT_CLASSIFY
+  BANK_MATCH
+  RISK_FLAG
+  MONTHLY_SUMMARY
+}
+
+enum InventoryMovementType {
+  IN
+  OUT
+  ADJUST
+  RETURN_IN
+  RETURN_OUT
+  OPENING_BALANCE
+}
+
+enum FixedAssetStatus {
+  ACTIVE
+  DISPOSED
+  WRITTEN_OFF
+}
+
+enum BankStatementSide {
+  DEBIT
+  CREDIT
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
 model Company {
   id               String    @id @default(cuid())
   nameTh           String
@@ -111,6 +236,17 @@ model Company {
   expenseRecords     ExpenseRecord[]
   attachments        Attachment[]
   generatedPdfs      GeneratedPdf[]
+  projects           Project[]
+  payments           Payment[]
+  journalEntries     JournalEntry[]
+  accountingPeriods  AccountingPeriod[]
+  vatRecords         VatRecord[]
+  whtRecords         WithholdingTaxRecord[]
+  riskItems          RiskItem[]
+  aiSuggestions      AiSuggestion[]
+  inventoryMovements InventoryMovement[]
+  fixedAssets        FixedAsset[]
+  bankStatementLines BankStatementLine[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -173,12 +309,12 @@ model AuditLog {
 }
 
 model DocumentNumberingRule {
-  id          String                @id @default(cuid())
+  id          String               @id @default(cuid())
   companyId   String
   type        DocumentType
-  prefix      String                @db.VarChar(8)
-  padding     Int                   @default(4)
-  resetPolicy NumberingResetPolicy  @default(YEARLY)
+  prefix      String               @db.VarChar(8)
+  padding     Int                  @default(4)
+  resetPolicy NumberingResetPolicy @default(YEARLY)
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -204,26 +340,28 @@ model DocumentNumberingCounter {
 }
 
 model Partner {
-  id          String      @id @default(cuid())
-  companyId   String
-  type        PartnerType @default(CUSTOMER)
-  code        String?     @db.VarChar(32)
-  nameTh      String      @db.VarChar(200)
-  nameEn      String?     @db.VarChar(200)
-  taxId       String?     @db.VarChar(20)
-  branch      String?     @db.VarChar(50)
-  address     String?     @db.Text
-  phone       String?     @db.VarChar(50)
-  email       String?     @db.VarChar(120)
-  website     String?     @db.VarChar(200)
-  note        String?     @db.Text
-  isActive    Boolean     @default(true)
+  id        String      @id @default(cuid())
+  companyId String
+  type      PartnerType @default(CUSTOMER)
+  code      String?     @db.VarChar(32)
+  nameTh    String      @db.VarChar(200)
+  nameEn    String?     @db.VarChar(200)
+  taxId     String?     @db.VarChar(20)
+  branch    String?     @db.VarChar(50)
+  address   String?     @db.Text
+  phone     String?     @db.VarChar(50)
+  email     String?     @db.VarChar(120)
+  website   String?     @db.VarChar(200)
+  note      String?     @db.Text
+  isActive  Boolean     @default(true)
 
-  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  contacts PartnerContact[]
-  asCustomerSalesDocs SalesDocument[] @relation("SalesDocumentCustomer")
+  company                 Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contacts                PartnerContact[]
+  asCustomerSalesDocs     SalesDocument[]  @relation("SalesDocumentCustomer")
   asVendorExpenseReceipts ExpenseReceipt[] @relation("ExpenseReceiptVendor")
   asVendorExpenseRecords  ExpenseRecord[]  @relation("ExpenseRecordVendor")
+  payments                Payment[]        @relation("PaymentPartner")
+  asCustomerProjects      Project[]        @relation("ProjectCustomer")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -263,8 +401,9 @@ model Product {
   vatable     Boolean     @default(true)
   isActive    Boolean     @default(true)
 
-  company  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  salesItems SalesDocumentItem[]
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  salesItems         SalesDocumentItem[]
+  inventoryMovements InventoryMovement[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -274,38 +413,38 @@ model Product {
 }
 
 model SalesDocument {
-  id              String         @id @default(cuid())
-  companyId       String
-  type            DocumentType
-  number          String         @db.VarChar(40)
-  beYear          Int
-  status          DocumentStatus @default(DRAFT)
+  id        String         @id @default(cuid())
+  companyId String
+  type      DocumentType
+  number    String         @db.VarChar(40)
+  beYear    Int
+  status    DocumentStatus @default(DRAFT)
 
-  customerId      String
-  projectId       String?
+  customerId String
+  projectId  String?
 
   parentDocumentId String?
   parentDocument   SalesDocument?  @relation("SalesDocumentChain", fields: [parentDocumentId], references: [id])
   childDocuments   SalesDocument[] @relation("SalesDocumentChain")
 
-  documentDate    DateTime
-  dueDate         DateTime?
-  reference       String?        @db.VarChar(100)
-  note            String?        @db.Text
+  documentDate DateTime
+  dueDate      DateTime?
+  reference    String?   @db.VarChar(100)
+  note         String?   @db.Text
 
   customerSnapshotName    String  @db.VarChar(200)
   customerSnapshotAddress String? @db.Text
   customerSnapshotTaxId   String? @db.VarChar(20)
   customerSnapshotBranch  String? @db.VarChar(50)
 
-  subtotal       Decimal @db.Decimal(18, 2) @default(0)
-  vatRate        Decimal @db.Decimal(5, 2)  @default(7)
-  vatAmount      Decimal @db.Decimal(18, 2) @default(0)
-  totalAfterVat  Decimal @db.Decimal(18, 2) @default(0)
-  whtRate        Decimal @db.Decimal(5, 2)  @default(0)
-  whtAmount      Decimal @db.Decimal(18, 2) @default(0)
-  grandTotal     Decimal @db.Decimal(18, 2) @default(0)
-  netReceived    Decimal @db.Decimal(18, 2) @default(0)
+  subtotal      Decimal @default(0) @db.Decimal(18, 2)
+  vatRate       Decimal @default(7) @db.Decimal(5, 2)
+  vatAmount     Decimal @default(0) @db.Decimal(18, 2)
+  totalAfterVat Decimal @default(0) @db.Decimal(18, 2)
+  whtRate       Decimal @default(0) @db.Decimal(5, 2)
+  whtAmount     Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal    Decimal @default(0) @db.Decimal(18, 2)
+  netReceived   Decimal @default(0) @db.Decimal(18, 2)
 
   confirmedAt DateTime?
   confirmedBy String?
@@ -340,14 +479,14 @@ model SalesDocumentItem {
   productId       String?
   lineNumber      Int
 
-  productCode  String? @db.VarChar(32)
-  description  String  @db.Text
-  unit         String  @db.VarChar(32)
-  quantity     Decimal @db.Decimal(18, 4)
-  unitPrice    Decimal @db.Decimal(18, 2)
-  discount     Decimal @db.Decimal(18, 2) @default(0)
-  lineTotal    Decimal @db.Decimal(18, 2)
-  vatable      Boolean @default(true)
+  productCode String? @db.VarChar(32)
+  description String  @db.Text
+  unit        String  @db.VarChar(32)
+  quantity    Decimal @db.Decimal(18, 4)
+  unitPrice   Decimal @db.Decimal(18, 2)
+  discount    Decimal @default(0) @db.Decimal(18, 2)
+  lineTotal   Decimal @db.Decimal(18, 2)
+  vatable     Boolean @default(true)
 
   salesDocument SalesDocument @relation(fields: [salesDocumentId], references: [id], onDelete: Cascade)
   product       Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -360,16 +499,16 @@ model SalesDocumentItem {
 }
 
 model Attachment {
-  id          String                @id @default(cuid())
-  companyId   String
-  targetType  AttachmentTargetType
-  targetId    String
-  fileName    String                @db.VarChar(300)
-  storedPath  String                @db.VarChar(500)
-  mimeType    String                @db.VarChar(100)
-  sizeBytes   Int
-  sha256      String?               @db.VarChar(64)
-  uploadedBy  String?
+  id         String               @id @default(cuid())
+  companyId  String
+  targetType AttachmentTargetType
+  targetId   String
+  fileName   String               @db.VarChar(300)
+  storedPath String               @db.VarChar(500)
+  mimeType   String               @db.VarChar(100)
+  sizeBytes  Int
+  sha256     String?              @db.VarChar(64)
+  uploadedBy String?
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -398,25 +537,25 @@ model ExpenseReceipt {
   category       String?   @db.VarChar(100)
   note           String?   @db.Text
 
-  subtotal      Decimal @db.Decimal(18, 2) @default(0)
-  vatAmount     Decimal @db.Decimal(18, 2) @default(0)
-  withholdingTaxAmount Decimal @db.Decimal(18, 2) @default(0)
-  grandTotal    Decimal @db.Decimal(18, 2) @default(0)
+  subtotal             Decimal @default(0) @db.Decimal(18, 2)
+  vatAmount            Decimal @default(0) @db.Decimal(18, 2)
+  withholdingTaxAmount Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal           Decimal @default(0) @db.Decimal(18, 2)
 
-  originalFileName String @db.VarChar(300)
-  storedPath       String @db.VarChar(500)
-  mimeType         String @db.VarChar(100)
+  originalFileName String  @db.VarChar(300)
+  storedPath       String  @db.VarChar(500)
+  mimeType         String  @db.VarChar(100)
   sizeBytes        Int
   sha256           String? @db.VarChar(64)
 
-  uploadedBy  String?
-  reviewedBy  String?
-  reviewedAt  DateTime?
-  accountedBy String?
-  accountedAt DateTime?
-  rejectReason String? @db.Text
+  uploadedBy   String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  accountedBy  String?
+  accountedAt  DateTime?
+  rejectReason String?   @db.Text
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   expenseRecord ExpenseRecord?
 
   createdAt DateTime @default(now())
@@ -433,46 +572,376 @@ model ExpenseRecord {
   companyId String
   receiptId String              @unique
   vendorId  String
+  projectId String?
   status    ExpenseRecordStatus @default(RECORDED)
 
   expenseDate    DateTime
-  documentNumber String? @db.VarChar(100)
-  category       String? @db.VarChar(100)
-  note           String? @db.Text
+  documentNumber String?  @db.VarChar(100)
+  category       String?  @db.VarChar(100)
+  note           String?  @db.Text
 
-  subtotal      Decimal @db.Decimal(18, 2) @default(0)
-  vatAmount     Decimal @db.Decimal(18, 2) @default(0)
-  withholdingTaxAmount Decimal @db.Decimal(18, 2) @default(0)
-  grandTotal    Decimal @db.Decimal(18, 2) @default(0)
+  subtotal             Decimal @default(0) @db.Decimal(18, 2)
+  vatAmount            Decimal @default(0) @db.Decimal(18, 2)
+  withholdingTaxAmount Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal           Decimal @default(0) @db.Decimal(18, 2)
 
   recordedBy String?
   recordedAt DateTime @default(now())
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  receipt ExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
-  vendor  Partner        @relation("ExpenseRecordVendor", fields: [vendorId], references: [id])
+  company    Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  receipt    ExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  vendor     Partner        @relation("ExpenseRecordVendor", fields: [vendorId], references: [id])
+  project    Project?       @relation("ProjectExpenses", fields: [projectId], references: [id])
+  fixedAsset FixedAsset?    @relation("ExpenseRecordFixedAsset")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([companyId, vendorId, expenseDate])
   @@index([companyId, status, expenseDate])
+  @@index([companyId, projectId])
 }
 
 model GeneratedPdf {
-  id              String       @id @default(cuid())
-  companyId       String
-  documentType    DocumentType
-  documentId      String
-  storedPath      String       @db.VarChar(500)
-  sizeBytes       Int
-  isPreview       Boolean      @default(false)
-  dataVersion     Int          @default(1)
-  generatedBy     String?
+  id           String       @id @default(cuid())
+  companyId    String
+  documentType DocumentType
+  documentId   String
+  storedPath   String       @db.VarChar(500)
+  sizeBytes    Int
+  isPreview    Boolean      @default(false)
+  dataVersion  Int          @default(1)
+  generatedBy  String?
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
   @@index([companyId, documentType, documentId])
+}
+
+// ============================================================================
+// Phase 2 Schema Foundation
+// Tables below are added by 20260516_phase2_schema_foundation migration.
+// Most still lack services + controllers; the schema is in place so each
+// upcoming sprint (5–8 in PRD §26) can implement its module without another
+// migration round.
+// ============================================================================
+
+model Project {
+  id          String        @id @default(cuid())
+  companyId   String
+  code        String?       @db.VarChar(32)
+  name        String        @db.VarChar(200)
+  customerId  String?
+  status      ProjectStatus @default(ACTIVE)
+  description String?       @db.Text
+  startDate   DateTime?
+  endDate     DateTime?
+  budget      Decimal?      @db.Decimal(18, 2)
+  note        String?       @db.Text
+
+  company     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer    Partner?        @relation("ProjectCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  expenses    ExpenseRecord[] @relation("ProjectExpenses")
+  fixedAssets FixedAsset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@index([companyId, customerId])
+}
+
+model Payment {
+  id          String           @id @default(cuid())
+  companyId   String
+  direction   PaymentDirection
+  partnerId   String
+  paymentDate DateTime
+  amount      Decimal          @db.Decimal(18, 2)
+  whtAmount   Decimal          @default(0) @db.Decimal(18, 2)
+  method      PaymentMethod    @default(CASH)
+  reference   String?          @db.VarChar(100)
+  bankAccount String?          @db.VarChar(100)
+  note        String?          @db.Text
+  status      PaymentStatus    @default(COMPLETED)
+
+  // Polymorphic link to source document (Sales doc / Expense record / etc.).
+  // Prisma doesn't model polymorphism — keep as plain columns + index, enforce
+  // referential semantics in application code.
+  sourceType String? @db.VarChar(40)
+  sourceId   String?
+
+  recordedBy String?
+  voidedBy   String?
+  voidedAt   DateTime?
+  voidReason String?   @db.Text
+
+  company   Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  partner   Partner               @relation("PaymentPartner", fields: [partnerId], references: [id])
+  whtRecord WithholdingTaxRecord? @relation("PaymentWht")
+  bankMatch BankStatementLine?    @relation("BankMatchedPayment")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, direction, paymentDate])
+  @@index([companyId, partnerId])
+  @@index([companyId, status])
+  @@index([sourceType, sourceId])
+}
+
+model JournalEntry {
+  id          String             @id @default(cuid())
+  companyId   String
+  entryDate   DateTime
+  description String             @db.Text
+  status      JournalEntryStatus @default(POSTED)
+  sourceType  JournalSourceType
+  sourceId    String?
+  totalDebit  Decimal            @default(0) @db.Decimal(18, 2)
+  totalCredit Decimal            @default(0) @db.Decimal(18, 2)
+  periodYear  Int
+  periodMonth Int
+
+  postedBy   String?
+  postedAt   DateTime?
+  voidedBy   String?
+  voidedAt   DateTime?
+  voidReason String?   @db.Text
+
+  company Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines   JournalEntryLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, entryDate])
+  @@index([companyId, periodYear, periodMonth])
+  @@index([companyId, sourceType, sourceId])
+  @@index([companyId, status])
+}
+
+model JournalEntryLine {
+  id             String  @id @default(cuid())
+  journalEntryId String
+  lineNumber     Int
+  accountCode    String  @db.VarChar(20)
+  accountName    String  @db.VarChar(120)
+  debit          Decimal @default(0) @db.Decimal(18, 2)
+  credit         Decimal @default(0) @db.Decimal(18, 2)
+  partnerId      String?
+  projectId      String?
+  description    String? @db.Text
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([journalEntryId, lineNumber])
+  @@index([journalEntryId])
+  @@index([accountCode])
+  @@index([partnerId])
+  @@index([projectId])
+}
+
+model AccountingPeriod {
+  id        String                 @id @default(cuid())
+  companyId String
+  year      Int
+  month     Int
+  status    AccountingPeriodStatus @default(OPEN)
+  closedAt  DateTime?
+  closedBy  String?
+  lockedAt  DateTime?
+  lockedBy  String?
+  note      String?                @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, year, month])
+  @@index([companyId, status])
+}
+
+model VatRecord {
+  id             String        @id @default(cuid())
+  companyId      String
+  recordType     VatRecordType
+  sourceType     String        @db.VarChar(40)
+  sourceId       String
+  documentDate   DateTime
+  documentNumber String?       @db.VarChar(100)
+  partnerName    String        @db.VarChar(200)
+  partnerTaxId   String?       @db.VarChar(20)
+  baseAmount     Decimal       @db.Decimal(18, 2)
+  vatRate        Decimal       @db.Decimal(5, 2)
+  vatAmount      Decimal       @db.Decimal(18, 2)
+  periodYear     Int
+  periodMonth    Int
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, sourceType, sourceId])
+  @@index([companyId, recordType, periodYear, periodMonth])
+}
+
+model WithholdingTaxRecord {
+  id           String        @id @default(cuid())
+  companyId    String
+  recordType   WhtRecordType
+  paymentId    String?       @unique
+  sourceType   String        @db.VarChar(40)
+  sourceId     String
+  paidAt       DateTime
+  partnerName  String        @db.VarChar(200)
+  partnerTaxId String?       @db.VarChar(20)
+  baseAmount   Decimal       @db.Decimal(18, 2)
+  rate         Decimal       @db.Decimal(5, 2)
+  whtAmount    Decimal       @db.Decimal(18, 2)
+  certNumber   String?       @db.VarChar(100)
+  category     String?       @db.VarChar(100)
+  periodYear   Int
+  periodMonth  Int
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payment Payment? @relation("PaymentWht", fields: [paymentId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, recordType, periodYear, periodMonth])
+}
+
+model RiskItem {
+  id          String         @id @default(cuid())
+  companyId   String
+  type        RiskItemType
+  level       RiskLevel
+  status      RiskItemStatus @default(OPEN)
+  entityType  String?        @db.VarChar(40)
+  entityId    String?
+  title       String         @db.VarChar(300)
+  description String?        @db.Text
+  detectedAt  DateTime       @default(now())
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  resolution  String?        @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status, level])
+  @@index([companyId, type])
+  @@index([entityType, entityId])
+}
+
+model AiSuggestion {
+  id              String             @id @default(cuid())
+  companyId       String
+  type            AiSuggestionType
+  status          AiSuggestionStatus @default(PENDING)
+  sourceType      String?            @db.VarChar(40)
+  sourceId        String?
+  attachmentId    String?
+  confidence      Decimal?           @db.Decimal(5, 4)
+  payload         Json
+  model           String?            @db.VarChar(100)
+  acceptedBy      String?
+  acceptedAt      DateTime?
+  rejectionReason String?            @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status, createdAt])
+  @@index([companyId, type, status])
+  @@index([sourceType, sourceId])
+}
+
+model InventoryMovement {
+  id            String                @id @default(cuid())
+  companyId     String
+  productId     String
+  type          InventoryMovementType
+  quantity      Decimal               @db.Decimal(18, 4)
+  movementDate  DateTime
+  unitCost      Decimal?              @db.Decimal(18, 2)
+  totalCost     Decimal?              @db.Decimal(18, 2)
+  referenceType String?               @db.VarChar(40)
+  referenceId   String?
+  note          String?               @db.Text
+  recordedBy    String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, productId, movementDate])
+  @@index([companyId, type])
+  @@index([referenceType, referenceId])
+}
+
+model FixedAsset {
+  id               String           @id @default(cuid())
+  companyId        String
+  code             String?          @db.VarChar(32)
+  name             String           @db.VarChar(200)
+  category         String           @db.VarChar(100)
+  status           FixedAssetStatus @default(ACTIVE)
+  acquiredAt       DateTime
+  cost             Decimal          @db.Decimal(18, 2)
+  salvageValue     Decimal          @default(0) @db.Decimal(18, 2)
+  usefulLifeMonths Int
+  accumulatedDepr  Decimal          @default(0) @db.Decimal(18, 2)
+  bookValue        Decimal          @db.Decimal(18, 2)
+  disposedAt       DateTime?
+  disposalReason   String?          @db.Text
+
+  expenseRecordId String? @unique
+  projectId       String?
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  expenseRecord ExpenseRecord? @relation("ExpenseRecordFixedAsset", fields: [expenseRecordId], references: [id], onDelete: SetNull)
+  project       Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@index([companyId, category])
+}
+
+model BankStatementLine {
+  id               String            @id @default(cuid())
+  companyId        String
+  bankAccount      String            @db.VarChar(100)
+  postedAt         DateTime
+  side             BankStatementSide
+  amount           Decimal           @db.Decimal(18, 2)
+  balance          Decimal?          @db.Decimal(18, 2)
+  description      String            @db.Text
+  reference        String?           @db.VarChar(100)
+  matchedPaymentId String?           @unique
+  matchedAt        DateTime?
+  matchConfidence  Decimal?          @db.Decimal(5, 4)
+  importBatchId    String?           @db.VarChar(64)
+
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  matchedPayment Payment? @relation("BankMatchedPayment", fields: [matchedPaymentId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, bankAccount, postedAt])
+  @@index([importBatchId])
 }
