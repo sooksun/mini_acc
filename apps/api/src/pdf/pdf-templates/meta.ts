@@ -5,6 +5,17 @@ export interface PdfDocMeta {
   primaryColor: string;
   signatures: { left: string; middle: string; right: string };
   receivedNote?: string;
+  /**
+   * Thai Revenue Department requires every tax-invoice copy to be labeled
+   * "ต้นฉบับ" (original) or "สำเนา" (copy). When set, the renderer stamps the
+   * top-right corner of the page. Non-VAT docs leave this undefined.
+   */
+  defaultOriginalCopy?: 'ต้นฉบับ' | 'สำเนา';
+  /**
+   * Optional subtitle rendered under the title box — used for VAT docs to
+   * clarify legal context (e.g. "ใบกำกับภาษีต้นฉบับ").
+   */
+  legalSubtitle?: string;
 }
 
 export const PDF_DOC_META: Record<
@@ -25,7 +36,7 @@ export const PDF_DOC_META: Record<
     title: 'ใบส่งของ',
     primaryColor: '#D96B00',
     signatures: { left: 'ผู้รับสินค้า', middle: 'ผู้ส่งสินค้า', right: 'ผู้มีอำนาจลงนาม' },
-    receivedNote: 'ได้รับสินค้าตามรายการข้างบนไว้เรียบร้อยแล้ว',
+    receivedNote: 'ได้รับสินค้าตามรายการข้างต้นไว้เรียบร้อยแล้ว',
   },
   INVOICE: {
     title: 'ใบแจ้งหนี้',
@@ -41,11 +52,15 @@ export const PDF_DOC_META: Record<
     title: 'ใบกำกับภาษี',
     primaryColor: '#1F5F8B',
     signatures: { left: 'ผู้ซื้อ', middle: 'ผู้ออกใบกำกับภาษี', right: 'ผู้มีอำนาจลงนาม' },
+    defaultOriginalCopy: 'ต้นฉบับ',
+    legalSubtitle: 'ใบกำกับภาษี (Tax Invoice)',
   },
   RECEIPT_TAX_INVOICE: {
     title: 'ใบเสร็จรับเงิน/ใบกำกับภาษี',
     primaryColor: '#1F5F8B',
     signatures: { left: 'ผู้จ่ายเงิน', middle: 'ผู้รับเงิน', right: 'ผู้มีอำนาจลงนาม' },
+    defaultOriginalCopy: 'ต้นฉบับ',
+    legalSubtitle: 'ใบเสร็จรับเงิน/ใบกำกับภาษี (Receipt / Tax Invoice)',
   },
 };
 

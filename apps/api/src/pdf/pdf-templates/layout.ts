@@ -9,12 +9,25 @@ import {
 } from './format';
 import { pdfStyles } from './styles';
 
-const MIN_ROWS = 21;
+// Master Invoice-PP-003-2569.pdf fits 22 placeholder rows in one A4 page using
+// very tight row height (~18pt). Our HTML rows are taller because of web font
+// metrics, so we cap the placeholder rows to keep every doc type on a single
+// A4 sheet. Delivery notes have a "received" acknowledgement block above the
+// signatures, so they get one fewer placeholder row.
+const MIN_ROWS_DEFAULT = 16;
+const MIN_ROWS_WITH_RECEIVED_NOTE = 15;
 
 export interface RenderInput {
   company: Company;
   doc: SalesDocument & { items: SalesDocumentItem[] };
   watermark?: string;
+  /**
+   * For VAT docs: render "ต้นฉบับ" or "สำเนา" stamp at top right. Defaults to
+   * the type's `defaultOriginalCopy` (currently "ต้นฉบับ" for TAX_INVOICE +
+   * RECEIPT_TAX_INVOICE, undefined for others). Pass explicit value to override
+   * — e.g. when generating a duplicate copy for the customer.
+   */
+  originalCopy?: 'ต้นฉบับ' | 'สำเนา';
 }
 
 export function buildPdfHtml(input: RenderInput): string {
@@ -35,6 +48,8 @@ export function buildPdfHtml(input: RenderInput): string {
     ? '<span style="color:#888;font-style:italic;">' + escapeHtml(doc.number) + '</span>'
     : '<strong>' + escapeHtml(doc.number) + '</strong>';
 
+  const originalCopy = input.originalCopy ?? meta.defaultOriginalCopy;
+
   return `<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -48,11 +63,12 @@ export function buildPdfHtml(input: RenderInput): string {
 <body>
 ${headerSection(company, meta)}
 ${titleBox(meta)}
+${originalCopy ? originalCopyBadge(originalCopy) : ''}
 ${customerSection(doc, customerTaxId, isHeadOffice, branchValue, numberDisplay)}
 ${itemsTable(doc, meta)}
-${meta.receivedNote ? receivedNoteBlock(meta.receivedNote) : ''}
 ${summaryBlock(doc, meta)}
 ${notesBlock()}
+${meta.receivedNote ? receivedNoteBlock(meta.receivedNote) : ''}
 ${signaturesBlock(meta, company)}
 ${input.watermark ? watermarkOverlay(input.watermark) : ''}
 </body>
@@ -64,6 +80,15 @@ function headerSection(company: Company, meta: PdfDocMeta): string {
   const tagline = company.tagline ? `<div class="sub">${escapeHtml(company.tagline)}</div>` : '';
   const phone = company.phone ? `โทร. ${escapeHtml(company.phone)}` : '';
   const taxLine = `เลขประจำตัวผู้เสียภาษี ${escapeHtml(formatTaxId(company.taxId))}`;
+  // Master PDF puts Thai + English address on separate lines. Author input may
+  // include "\n" in company.address to express this; split and render each line.
+  const addressLines = company.address.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const addressHtml = addressLines
+    .map((line, idx) => {
+      const prefix = idx === 0 ? 'สำนักงานใหญ่ : ' : '';
+      return `<div class="company-line">${escapeHtml(prefix + line)}</div>`;
+    })
+    .join('');
   return `
 <div class="header">
   <div class="brand-mark">
@@ -73,7 +98,7 @@ function headerSection(company: Company, meta: PdfDocMeta): string {
   <div class="company-block">
     <div class="company-name-th">${escapeHtml(company.nameTh)}</div>
     ${company.nameEn ? `<div class="company-name-en">${escapeHtml(company.nameEn)}</div>` : ''}
-    <div class="company-line">สำนักงานใหญ่ : ${escapeHtml(company.address)}</div>
+    ${addressHtml}
     <div class="company-line">${phone} &nbsp; ${taxLine}</div>
   </div>
   <div class="for-customer">สำหรับลูกค้า</div>
@@ -81,7 +106,15 @@ function headerSection(company: Company, meta: PdfDocMeta): string {
 }
 
 function titleBox(meta: PdfDocMeta): string {
-  return `<div class="title-box">${escapeHtml(meta.title)}</div>`;
+  const subtitle = meta.legalSubtitle
+    ? `<div class="title-subtitle">${escapeHtml(meta.legalSubtitle)}</div>`
+    : '';
+  return `<div class="title-box">${escapeHtml(meta.title)}${subtitle}</div>`;
+}
+
+function originalCopyBadge(label: 'ต้นฉบับ' | 'สำเนา'): string {
+  const cls = label === 'ต้นฉบับ' ? 'badge-original' : 'badge-copy';
+  return `<div class="oc-badge ${cls}">${escapeHtml(label)}</div>`;
 }
 
 function customerSection(
@@ -113,13 +146,14 @@ function customerSection(
 
 function itemsTable(
   doc: SalesDocument & { items: SalesDocumentItem[] },
-  _meta: PdfDocMeta,
+  meta: PdfDocMeta,
 ): string {
+  const minRows = meta.receivedNote ? MIN_ROWS_WITH_RECEIVED_NOTE : MIN_ROWS_DEFAULT;
   const rows: string[] = [];
   for (const item of doc.items) {
     rows.push(itemRow(item));
   }
-  const filler = Math.max(0, MIN_ROWS - doc.items.length);
+  const filler = Math.max(0, minRows - doc.items.length);
   for (let i = 0; i < filler; i++) {
     rows.push(emptyRow(doc.items.length + i + 1));
   }

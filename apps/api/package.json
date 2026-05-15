@@ -12,6 +12,7 @@
     "test:unit": "dotenv -e .env.test -- jest --runInBand --testPathIgnorePatterns=integration",
     "test:integration": "dotenv -e .env.test -- jest --runInBand --testPathPattern=integration",
     "test:db:setup": "dotenv -e .env.test -- prisma migrate deploy",
+    "pdf:samples": "tsx scripts/render-pdf-samples.ts",
     "prisma:generate": "dotenv -e ../../.env -- prisma generate",
     "prisma:migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "prisma:migrate:deploy": "dotenv -e ../../.env -- prisma migrate deploy",

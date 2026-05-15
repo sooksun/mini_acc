@@ -25,6 +25,9 @@ coverage
 var/attachments
 var/test-attachments
 var/generated_pdfs
+var/pdf-samples
+# api ephemeral output (test attachments, generated/sample PDFs)
+apps/api/var/
 storage/
 *.tsbuildinfo
 
