@@ -39,6 +39,8 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
     group: 'ตั้งค่า',
     items: [
       { href: '/settings/company', label: 'ตั้งค่าบริษัท' },
+      { href: '/settings/users', label: 'ผู้ใช้และสิทธิ์' },
+      { href: '/settings/document-numbering', label: 'เลขเอกสาร' },
       { href: '/settings/audit-log', label: 'Audit Log' },
     ],
   },
