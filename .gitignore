@@ -9,6 +9,7 @@ build
 .env
 .env.*
 !.env.example
+!.env.test.example
 
 *.log
 npm-debug.log*
@@ -22,6 +23,9 @@ coverage
 .nyc_output
 
 var/attachments
+var/test-attachments
 var/generated_pdfs
+storage/
+*.tsbuildinfo
 
 prisma/migrations/dev.db*

@@ -21,6 +21,8 @@ const TABLES_FK_DEPENDENT_ORDER = [
   'SalesDocumentItem',
   'GeneratedPdf',
   'Attachment',
+  'ExpenseRecord',
+  'ExpenseReceipt',
   'SalesDocument',
   'PartnerContact',
   'Partner',

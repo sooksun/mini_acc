@@ -2,20 +2,24 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
+import type { Role } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadExpenseReceiptDto } from './dto/upload-expense-receipt.dto';
 import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
+import { sniffMime } from './mime-sniff';
+import { validateExpenseTransition } from './transitions';
 
 type UploadFile = {
   originalname: string;
@@ -33,6 +37,8 @@ const ALLOWED_MIME_TYPES = new Set([
 
 @Injectable()
 export class ExpenseReceiptsService {
+  private readonly logger = new Logger(ExpenseReceiptsService.name);
+
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
@@ -40,65 +46,113 @@ export class ExpenseReceiptsService {
 
   async upload(companyId: string, userId: string, dto: UploadExpenseReceiptDto, file?: UploadFile) {
     if (!file) throw new BadRequestException('Receipt file is required');
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('Only PDF, JPEG, PNG, or WEBP receipt files are supported');
+
+    // H1: validate by file content, not by client-supplied Content-Type.
+    // The sniffer only recognizes the 4 formats we accept; anything else is rejected here.
+    const detectedMime = sniffMime(file.buffer);
+    if (!detectedMime || !ALLOWED_MIME_TYPES.has(detectedMime)) {
+      throw new BadRequestException(
+        'รองรับเฉพาะไฟล์ PDF, JPEG, PNG, WEBP — ไฟล์ที่อัปโหลดไม่ตรงประเภทใด ๆ',
+      );
+    }
+    if (file.mimetype !== detectedMime) {
+      throw new BadRequestException({
+        statusCode: 400,
+        code: 'MIME_MISMATCH',
+        message: `Content-Type ที่ส่งมา (${file.mimetype}) ไม่ตรงกับเนื้อหาไฟล์จริง (${detectedMime})`,
+      });
     }
 
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
+
+    // H6: dedup. Same file uploaded twice for the same company should not create
+    // a second receipt + second file on disk.
+    const existing = await this.prisma.expenseReceipt.findFirst({
+      where: { companyId, sha256 },
+      select: { id: true, status: true, originalFileName: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'EXPENSE_RECEIPT_DUPLICATE',
+        message: `พบใบเสร็จเดิมในระบบแล้ว (${existing.originalFileName}) สถานะ ${existing.status}`,
+        duplicateOf: existing.id,
+        duplicateStatus: existing.status,
+      });
+    }
+
     const vendor = await this.findVendorCandidate(companyId, dto.vendorTaxId, dto.vendorName);
-    const storedPath = await this.persistFile(companyId, file);
     const status = vendor
       ? 'READY_TO_ACCOUNT'
       : dto.vendorName || dto.vendorTaxId
         ? 'PENDING_VENDOR_APPROVAL'
         : 'UPLOADED';
 
-    const receipt = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.expenseReceipt.create({
-        data: {
-          companyId,
-          status,
-          vendorId: vendor?.id,
-          proposedVendorName: this.blankToNull(dto.vendorName),
-          proposedVendorTaxId: this.blankToNull(dto.vendorTaxId),
-          proposedVendorBranch: this.blankToNull(dto.vendorBranch),
-          proposedVendorAddress: this.blankToNull(dto.vendorAddress),
-          documentNumber: this.blankToNull(dto.documentNumber),
-          documentDate: this.parseDate(dto.documentDate),
-          paidAt: this.parseDate(dto.paidAt),
-          category: this.blankToNull(dto.category),
-          note: this.blankToNull(dto.note),
-          subtotal: this.money(dto.subtotal),
-          vatAmount: this.money(dto.vatAmount),
-          withholdingTaxAmount: this.money(dto.withholdingTaxAmount),
-          grandTotal: this.money(dto.grandTotal),
-          originalFileName: file.originalname,
-          storedPath,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          sha256,
-          uploadedBy: userId,
-        },
+    // C4: write file to disk only if we commit the receipt; clean up otherwise.
+    // We persist the file *before* the tx so the row can reference its path, but
+    // if the tx throws we unlink the orphan in finally.
+    const storedPath = await this.persistFile(companyId, file);
+    let committed = false;
+    try {
+      const receipt = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.expenseReceipt.create({
+          data: {
+            companyId,
+            status,
+            vendorId: vendor?.id,
+            proposedVendorName: this.blankToNull(dto.vendorName),
+            proposedVendorTaxId: this.blankToNull(dto.vendorTaxId),
+            proposedVendorBranch: this.blankToNull(dto.vendorBranch),
+            proposedVendorAddress: this.blankToNull(dto.vendorAddress),
+            documentNumber: this.blankToNull(dto.documentNumber),
+            // DTO already validates with @IsDateString (strict ISO 8601), so direct
+            // construction is safe. Keep the null path for the optional case.
+            documentDate: dto.documentDate ? new Date(dto.documentDate) : null,
+            paidAt: dto.paidAt ? new Date(dto.paidAt) : null,
+            category: this.blankToNull(dto.category),
+            note: this.blankToNull(dto.note),
+            subtotal: this.money(dto.subtotal),
+            vatAmount: this.money(dto.vatAmount),
+            withholdingTaxAmount: this.money(dto.withholdingTaxAmount),
+            grandTotal: this.money(dto.grandTotal),
+            originalFileName: file.originalname,
+            storedPath,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            sha256,
+            uploadedBy: userId,
+          },
+        });
+
+        await tx.attachment.create({
+          data: {
+            companyId,
+            targetType: 'EXPENSE',
+            targetId: created.id,
+            fileName: file.originalname,
+            storedPath,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            sha256,
+            uploadedBy: userId,
+          },
+        });
+
+        return created;
       });
 
-      await tx.attachment.create({
-        data: {
-          companyId,
-          targetType: 'EXPENSE',
-          targetId: created.id,
-          fileName: file.originalname,
-          storedPath,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          sha256,
-          uploadedBy: userId,
-        },
-      });
-
-      return created;
-    });
-
-    return this.findOne(companyId, receipt.id);
+      committed = true;
+      return this.findOne(companyId, receipt.id);
+    } finally {
+      if (!committed) {
+        await unlink(storedPath).catch((err) => {
+          this.logger.error(
+            `Failed to unlink orphan upload after tx rollback: path=${storedPath} err=${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+    }
   }
 
   async list(companyId: string, dto: ListExpenseReceiptsDto) {
@@ -145,51 +199,19 @@ export class ExpenseReceiptsService {
     return this.toDto(receipt);
   }
 
-  async linkVendor(companyId: string, userId: string, id: string, dto: LinkExpenseVendorDto) {
-    await this.findOne(companyId, id);
-    const vendor = await this.requireVendor(companyId, dto.vendorId);
-
-    const receipt = await this.prisma.expenseReceipt.update({
-      where: { id },
-      data: {
-        vendorId: vendor.id,
-        status: 'READY_TO_ACCOUNT',
-        reviewedBy: userId,
-        reviewedAt: new Date(),
-      },
-      include: this.include(),
-    });
-
-    return this.toDto(receipt);
-  }
-
-  async approveVendor(companyId: string, userId: string, id: string, dto: ApproveExpenseVendorDto) {
+  /** Read entity (not DTO) — used internally where Decimal columns and FK fields are needed. */
+  private async loadEntity(companyId: string, id: string) {
     const receipt = await this.prisma.expenseReceipt.findFirst({
       where: { id, companyId },
-      include: this.include(),
     });
     if (!receipt) throw new NotFoundException('Expense receipt not found');
-    if (receipt.status === 'ACCOUNTED') throw new ConflictException('Receipt is already accounted');
+    return receipt;
+  }
 
-    if (dto.vendorId) {
-      return this.linkVendor(companyId, userId, id, { vendorId: dto.vendorId });
-    }
-
-    const nameTh = this.blankToNull(dto.nameTh) ?? receipt.proposedVendorName;
-    if (!nameTh) throw new BadRequestException('Vendor name is required');
-
-    const vendor = await this.prisma.partner.create({
-      data: {
-        companyId,
-        type: 'VENDOR',
-        code: this.blankToNull(dto.code),
-        nameTh,
-        taxId: this.blankToNull(dto.taxId) ?? receipt.proposedVendorTaxId,
-        branch: this.blankToNull(dto.branch) ?? receipt.proposedVendorBranch,
-        address: this.blankToNull(dto.address) ?? receipt.proposedVendorAddress,
-        note: `สร้างจากใบเสร็จรายจ่าย ${receipt.documentNumber ?? receipt.originalFileName}`,
-      },
-    });
+  async linkVendor(companyId: string, userId: string, role: Role, id: string, dto: LinkExpenseVendorDto) {
+    const receipt = await this.loadEntity(companyId, id);
+    validateExpenseTransition({ from: receipt.status, to: 'READY_TO_ACCOUNT', role });
+    const vendor = await this.requireVendor(companyId, dto.vendorId);
 
     const updated = await this.prisma.expenseReceipt.update({
       where: { id },
@@ -205,17 +227,92 @@ export class ExpenseReceiptsService {
     return this.toDto(updated);
   }
 
-  async account(companyId: string, userId: string, id: string) {
-    const receipt = await this.prisma.expenseReceipt.findFirst({
-      where: { id, companyId },
-      include: this.include(),
-    });
-    if (!receipt) throw new NotFoundException('Expense receipt not found');
-    if (!receipt.vendorId) throw new UnprocessableEntityException('Vendor must be linked before accounting');
-    if (receipt.status === 'ACCOUNTED') throw new ConflictException('Receipt is already accounted');
-    if (receipt.status === 'REJECTED') throw new ConflictException('Rejected receipt cannot be accounted');
+  async approveVendor(companyId: string, userId: string, role: Role, id: string, dto: ApproveExpenseVendorDto) {
+    const receipt = await this.loadEntity(companyId, id);
+    validateExpenseTransition({ from: receipt.status, to: 'READY_TO_ACCOUNT', role });
 
-    const expenseDate = receipt.paidAt ?? receipt.documentDate ?? new Date();
+    if (dto.vendorId) {
+      return this.linkVendor(companyId, userId, role, id, { vendorId: dto.vendorId });
+    }
+
+    const nameTh = this.blankToNull(dto.nameTh) ?? receipt.proposedVendorName;
+    if (!nameTh) throw new BadRequestException('Vendor name is required');
+
+    const taxId = this.blankToNull(dto.taxId) ?? receipt.proposedVendorTaxId;
+    const branch = this.blankToNull(dto.branch) ?? receipt.proposedVendorBranch;
+    const address = this.blankToNull(dto.address) ?? receipt.proposedVendorAddress;
+    const code = this.blankToNull(dto.code);
+
+    // H5: don't silently create a duplicate vendor.
+    // Match by taxId first (strongest identity), then by exact nameTh.
+    const collision = await this.findVendorCandidate(companyId, taxId ?? undefined, nameTh);
+    if (collision) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'VENDOR_ALREADY_EXISTS',
+        message: `พบผู้ขายเดิมในระบบ (${collision.nameTh}) — กรุณาผูกใบเสร็จกับผู้ขายเดิม`,
+        existingVendorId: collision.id,
+      });
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const vendor = await tx.partner.create({
+        data: {
+          companyId,
+          type: 'VENDOR',
+          code,
+          nameTh,
+          taxId,
+          branch,
+          address,
+          note: `สร้างจากใบเสร็จรายจ่าย ${receipt.documentNumber ?? receipt.originalFileName}`,
+        },
+      });
+
+      return tx.expenseReceipt.update({
+        where: { id },
+        data: {
+          vendorId: vendor.id,
+          status: 'READY_TO_ACCOUNT',
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+        },
+        include: this.include(),
+      });
+    });
+
+    return this.toDto(updated);
+  }
+
+  async account(companyId: string, userId: string, role: Role, id: string) {
+    const receipt = await this.loadEntity(companyId, id);
+    validateExpenseTransition({ from: receipt.status, to: 'ACCOUNTED', role });
+
+    if (!receipt.vendorId) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'VENDOR_REQUIRED',
+        message: 'ต้องผูกผู้ขายก่อนจึงจะลงรายจ่ายได้',
+      });
+    }
+
+    // H4: refuse to book a zero-baht expense, and refuse to default the expense date to "today".
+    // An expense without a real date silently drifts into the wrong accounting period.
+    if (receipt.grandTotal.lte(0)) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'EXPENSE_AMOUNT_REQUIRED',
+        message: 'ยอดรวมต้องมากกว่า 0 จึงจะลงรายจ่ายได้',
+      });
+    }
+    const expenseDate = receipt.paidAt ?? receipt.documentDate;
+    if (!expenseDate) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'EXPENSE_DATE_REQUIRED',
+        message: 'ต้องระบุวันที่จ่ายหรือวันที่เอกสารก่อนลงรายจ่าย',
+      });
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.expenseRecord.create({
@@ -249,9 +346,11 @@ export class ExpenseReceiptsService {
     return this.toDto(updated);
   }
 
-  async reject(companyId: string, userId: string, id: string, dto: RejectExpenseReceiptDto) {
-    await this.findOne(companyId, id);
-    const receipt = await this.prisma.expenseReceipt.update({
+  async reject(companyId: string, userId: string, role: Role, id: string, dto: RejectExpenseReceiptDto) {
+    const receipt = await this.loadEntity(companyId, id);
+    validateExpenseTransition({ from: receipt.status, to: 'REJECTED', role, reason: dto.reason });
+
+    const updated = await this.prisma.expenseReceipt.update({
       where: { id },
       data: {
         status: 'REJECTED',
@@ -261,7 +360,16 @@ export class ExpenseReceiptsService {
       },
       include: this.include(),
     });
-    return this.toDto(receipt);
+    return this.toDto(updated);
+  }
+
+  async openStoredFile(companyId: string, id: string) {
+    const receipt = await this.prisma.expenseReceipt.findFirst({
+      where: { id, companyId },
+      select: { storedPath: true, originalFileName: true, mimeType: true },
+    });
+    if (!receipt) throw new NotFoundException('Expense receipt not found');
+    return receipt;
   }
 
   private async findVendorCandidate(companyId: string, taxId?: string, name?: string) {
@@ -305,7 +413,9 @@ export class ExpenseReceiptsService {
   }
 
   private async persistFile(companyId: string, file: UploadFile) {
-    const root = this.config.get<string>('FILE_STORAGE_ROOT') ?? join(process.cwd(), 'storage');
+    // H8: read ATTACHMENT_DIR (the env var actually declared in .env.example), not the
+    // ad-hoc FILE_STORAGE_ROOT the old code expected.
+    const root = this.config.get<string>('ATTACHMENT_DIR') ?? join(process.cwd(), 'var', 'attachments');
     const dir = join(root, 'expense-receipts', companyId);
     await mkdir(dir, { recursive: true });
     const ext = this.extensionFor(file.mimetype);
@@ -321,13 +431,6 @@ export class ExpenseReceiptsService {
     if (mimeType === 'image/png') return '.png';
     if (mimeType === 'image/webp') return '.webp';
     return '';
-  }
-
-  private parseDate(value?: string) {
-    if (!value) return null;
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) throw new BadRequestException(`Invalid date: ${value}`);
-    return date;
   }
 
   private money(value?: string) {

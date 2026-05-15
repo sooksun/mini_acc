@@ -8,9 +8,20 @@ import { Modal } from '@/components/ui/Modal';
 import { PartnerPicker } from '@/components/ui/PartnerPicker';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
+import { api, apiBlob } from '@/lib/api';
 import { getUser } from '@/lib/auth';
 import { formatThaiCurrency, formatThaiDateShort, formatThaiDateTime } from '@/lib/format';
+
+function checkAccount(item: ExpenseReceipt): { ok: boolean; reason: string } {
+  const amount = Number(item.grandTotal);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, reason: 'ต้องระบุยอดรวมมากกว่า 0 ก่อนลงรายจ่าย' };
+  }
+  if (!item.paidAt && !item.documentDate) {
+    return { ok: false, reason: 'ต้องระบุวันที่จ่ายหรือวันที่เอกสารก่อนลงรายจ่าย' };
+  }
+  return { ok: true, reason: '' };
+}
 
 interface Partner {
   id: string;
@@ -139,6 +150,24 @@ export function ExpenseReceiptsPage() {
     }
   }
 
+  async function viewFile(receipt: ExpenseReceipt) {
+    try {
+      const blob = await apiBlob(`/expense-receipts/${receipt.id}/file`);
+      const url = URL.createObjectURL(blob);
+      const popup = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+        URL.revokeObjectURL(url);
+        return;
+      }
+      // Browsers may render directly from the blob URL; revoke after the user has
+      // had time to load it. 60s is conservative.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      toast.error(e.message ?? 'เปิดไฟล์ไม่สำเร็จ');
+    }
+  }
+
   const pendingCount = useMemo(
     () => items.filter((item) => item.status === 'PENDING_VENDOR_APPROVAL').length,
     [items],
@@ -244,32 +273,16 @@ export function ExpenseReceiptsPage() {
                     <td className="px-4 py-3 text-right font-mono">{formatThaiCurrency(item.grandTotal)}</td>
                     <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2">
-                        {canApproveVendor && item.status === 'PENDING_VENDOR_APPROVAL' && (
-                          <button
-                            onClick={() => approveNewVendor(item)}
-                            className="rounded-md border border-warn/40 bg-warn/5 px-2.5 py-1 text-[12px] text-warn hover:bg-warn/10"
-                          >
-                            อนุมัติผู้ขายใหม่
-                          </button>
-                        )}
-                        {canUpload && item.status !== 'ACCOUNTED' && item.status !== 'REJECTED' && (
-                          <button
-                            onClick={() => setLinking(item)}
-                            className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
-                          >
-                            ผูกผู้ขาย
-                          </button>
-                        )}
-                        {canAccount && item.status === 'READY_TO_ACCOUNT' && (
-                          <button
-                            onClick={() => accountReceipt(item)}
-                            className="rounded-md bg-brand px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90"
-                          >
-                            บันทึกรายจ่าย
-                          </button>
-                        )}
-                      </div>
+                      <RowActions
+                        item={item}
+                        canApproveVendor={canApproveVendor}
+                        canUpload={canUpload}
+                        canAccount={canAccount}
+                        onApproveNewVendor={() => approveNewVendor(item)}
+                        onLink={() => setLinking(item)}
+                        onAccount={() => accountReceipt(item)}
+                        onView={() => viewFile(item)}
+                      />
                     </td>
                   </tr>
                 ))
@@ -316,6 +329,83 @@ function StatusBadge({ status }: { status: ExpenseReceiptStatus }) {
     <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11.5px] ${meta.cls}`}>
       {meta.label}
     </span>
+  );
+}
+
+function RowActions({
+  item,
+  canApproveVendor,
+  canUpload,
+  canAccount,
+  onApproveNewVendor,
+  onLink,
+  onAccount,
+  onView,
+}: {
+  item: ExpenseReceipt;
+  canApproveVendor: boolean;
+  canUpload: boolean;
+  canAccount: boolean;
+  onApproveNewVendor: () => void;
+  onLink: () => void;
+  onAccount: () => void;
+  onView: () => void;
+}) {
+  // Mirror server-side guards (H4) so the user sees the failure reason before
+  // hitting the API and getting a 422 in a toast.
+  const preflight = checkAccount(item);
+  const showLink =
+    canUpload && (item.status === 'UPLOADED' || item.status === 'PENDING_VENDOR_APPROVAL');
+  const showReLink = canUpload && item.status === 'READY_TO_ACCOUNT';
+  const showApproveNew =
+    canApproveVendor && item.status === 'PENDING_VENDOR_APPROVAL' && !!item.proposedVendorName;
+  const showAccount = canAccount && item.status === 'READY_TO_ACCOUNT';
+
+  return (
+    <div className="flex justify-end gap-2">
+      <button
+        onClick={onView}
+        title="เปิดไฟล์ใบเสร็จในแท็บใหม่"
+        className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
+      >
+        ดูไฟล์
+      </button>
+      {showApproveNew && (
+        <button
+          onClick={onApproveNewVendor}
+          className="rounded-md border border-warn/40 bg-warn/5 px-2.5 py-1 text-[12px] text-warn hover:bg-warn/10"
+        >
+          อนุมัติผู้ขายใหม่
+        </button>
+      )}
+      {showLink && (
+        <button
+          onClick={onLink}
+          className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
+        >
+          ผูกผู้ขายเดิม
+        </button>
+      )}
+      {showReLink && (
+        <button
+          onClick={onLink}
+          title="เปลี่ยนผู้ขายที่ผูกไว้ก่อนลงรายจ่าย"
+          className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
+        >
+          เปลี่ยนผู้ขาย
+        </button>
+      )}
+      {showAccount && (
+        <button
+          onClick={onAccount}
+          disabled={!preflight.ok}
+          title={preflight.ok ? 'ลงรายจ่ายเข้าระบบ' : preflight.reason}
+          className="rounded-md bg-brand px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:opacity-50"
+        >
+          บันทึกรายจ่าย
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -416,6 +506,9 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
     setVendor(receipt?.vendor ?? null);
   }, [receipt]);
 
+  const isReLink = !!receipt?.vendor;
+  const unchanged = !!receipt?.vendor && vendor?.id === receipt.vendor.id;
+
   async function save() {
     if (!receipt || !vendor) return;
     setSaving(true);
@@ -424,7 +517,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
         method: 'POST',
         body: JSON.stringify({ vendorId: vendor.id }),
       });
-      toast.success('ผูกผู้ขายแล้ว');
+      toast.success(isReLink ? 'เปลี่ยนผู้ขายแล้ว' : 'ผูกผู้ขายแล้ว');
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -437,7 +530,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
     <Modal
       open={!!receipt}
       onClose={onClose}
-      title="ผูกใบเสร็จกับผู้ขายเดิม"
+      title={isReLink ? 'เปลี่ยนผู้ขายของใบเสร็จ' : 'ผูกใบเสร็จกับผู้ขายเดิม'}
       footer={
         <>
           <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-[13px]">
@@ -446,8 +539,9 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
           <button
             type="button"
             onClick={save}
-            disabled={!vendor || saving}
-            className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+            disabled={!vendor || saving || unchanged}
+            title={unchanged ? 'ยังไม่ได้เปลี่ยนผู้ขาย' : undefined}
+            className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             บันทึก
           </button>
@@ -455,7 +549,16 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
       }
     >
       <div className="space-y-3">
-        {receipt && (
+        {receipt && isReLink && (
+          <div className="rounded-md border border-info/40 bg-info/5 p-3 text-[13px] text-text-soft">
+            <div className="text-[11.5px] text-text-mute">ผู้ขายปัจจุบัน</div>
+            <div className="font-medium text-text">{receipt.vendor!.nameTh}</div>
+            <div className="font-mono text-[11px] text-text-mute">
+              {receipt.vendor!.taxId ?? 'ไม่มีเลขผู้เสียภาษี'}
+            </div>
+          </div>
+        )}
+        {receipt && !isReLink && (receipt.proposedVendorName || receipt.proposedVendorTaxId) && (
           <div className="rounded-md border border-border bg-surface-2 p-3 text-[13px] text-text-soft">
             ระบบพบจากไฟล์: {receipt.proposedVendorName ?? 'ไม่ระบุชื่อ'} · {receipt.proposedVendorTaxId ?? 'ไม่มีเลขผู้เสียภาษี'}
           </div>
@@ -464,7 +567,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
           type="VENDOR"
           value={vendor}
           onChange={setVendor}
-          placeholder="ค้นหาและเลือกผู้ขายเดิม"
+          placeholder={isReLink ? 'เลือกผู้ขายใหม่' : 'ค้นหาและเลือกผู้ขายเดิม'}
         />
       </div>
     </Modal>

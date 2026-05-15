@@ -2,14 +2,18 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import * as fs from 'node:fs/promises';
+import type { Response } from 'express';
 import type { AuthUser } from '@hj/shared-types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -22,6 +26,9 @@ import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
+
+// H8: read MAX_UPLOAD_MB from env so .env.example and FileInterceptor agree.
+const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024;
 
 @Controller('expense-receipts')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -38,9 +45,35 @@ export class ExpenseReceiptsController {
     return this.expenseReceipts.findOne(user.companyId, id);
   }
 
+  @Get(':id/file')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER')
+  @AuditAction('DOWNLOAD_EXPENSE_RECEIPT', {
+    entityType: 'ExpenseReceipt',
+    getEntityId: (req) => req.params['id'] as string,
+  })
+  async file(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const { storedPath, originalFileName, mimeType } =
+      await this.expenseReceipts.openStoredFile(user.companyId, id);
+    let buffer: Buffer;
+    try {
+      buffer = await fs.readFile(storedPath);
+    } catch {
+      throw new NotFoundException('ไฟล์ใบเสร็จไม่พบบนเครื่องเก็บข้อมูล');
+    }
+    const safeName = originalFileName.replace(/[\r\n"]/g, '_');
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+    res.setHeader('Cache-Control', 'private, max-age=0');
+    res.end(buffer);
+  }
+
   @Post('upload')
   @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
   @AuditAction('UPLOAD_EXPENSE_RECEIPT', {
     entityType: 'ExpenseReceipt',
     getEntityId: (_req, res) => res?.id,
@@ -70,7 +103,7 @@ export class ExpenseReceiptsController {
     @Param('id') id: string,
     @Body() dto: LinkExpenseVendorDto,
   ) {
-    return this.expenseReceipts.linkVendor(user.companyId, user.id, id, dto);
+    return this.expenseReceipts.linkVendor(user.companyId, user.id, user.role, id, dto);
   }
 
   @Post(':id/approve-vendor')
@@ -85,7 +118,7 @@ export class ExpenseReceiptsController {
     @Param('id') id: string,
     @Body() dto: ApproveExpenseVendorDto,
   ) {
-    return this.expenseReceipts.approveVendor(user.companyId, user.id, id, dto);
+    return this.expenseReceipts.approveVendor(user.companyId, user.id, user.role, id, dto);
   }
 
   @Post(':id/account')
@@ -96,7 +129,7 @@ export class ExpenseReceiptsController {
     getMetadata: (_req, res) => ({ expenseRecordId: res?.expenseRecord?.id, vendorId: res?.vendorId }),
   })
   account(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.expenseReceipts.account(user.companyId, user.id, id);
+    return this.expenseReceipts.account(user.companyId, user.id, user.role, id);
   }
 
   @Post(':id/reject')
@@ -111,6 +144,6 @@ export class ExpenseReceiptsController {
     @Param('id') id: string,
     @Body() dto: RejectExpenseReceiptDto,
   ) {
-    return this.expenseReceipts.reject(user.companyId, user.id, id, dto);
+    return this.expenseReceipts.reject(user.companyId, user.id, user.role, id, dto);
   }
 }
