@@ -39,8 +39,10 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000
 
+# tzdata can prompt for the timezone interactively; force noninteractive
+# so `docker build` doesn't hang waiting for input.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
     && ln -sf /usr/share/zoneinfo/Asia/Bangkok /etc/localtime \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 

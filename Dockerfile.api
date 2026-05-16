@@ -37,8 +37,10 @@ ENV NODE_ENV=production \
     TZ=Asia/Bangkok \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# tzdata on Ubuntu 22.04 prompts for the timezone interactively without
+# DEBIAN_FRONTEND=noninteractive, which hangs `docker build` forever (no TTY).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         fonts-thai-tlwg \
         fonts-noto-cjk \
         tzdata \
