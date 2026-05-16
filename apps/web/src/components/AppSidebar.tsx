@@ -34,6 +34,7 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
   {
     group: 'รายจ่าย',
     items: [
+      { href: '/ai-inbox', label: 'AI Inbox' },
       { href: '/expenses/receipts', label: 'อัปโหลดใบเสร็จ' },
     ],
   },

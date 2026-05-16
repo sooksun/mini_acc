@@ -22,6 +22,7 @@ import { ClosingModule } from './closing/closing.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
 import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
     InventoryModule,
     FixedAssetsModule,
     AccountantPackModule,
+    AiModule,
   ],
   providers: [
     {
