@@ -7,7 +7,37 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { StatCard } from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
+import { getToken } from '@/lib/auth';
 import { formatThaiCurrency, formatThaiDateShort } from '@/lib/format';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
+/**
+ * Open an authenticated GET in a new browser tab. Used for PDF streaming
+ * endpoints where the response is binary and we want the user to preview
+ * inline (the browser's native PDF viewer handles printing).
+ *
+ * We can't just put the URL in <a target="_blank"> because the API requires
+ * Authorization header. Instead we fetch as blob then open via blob URL.
+ */
+async function openAuthedPdf(path: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { message?: string }).message ?? `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const popup = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!popup) {
+    URL.revokeObjectURL(url);
+    throw new Error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 interface Dashboard {
   period: { year: number; month: number | null };
@@ -49,6 +79,12 @@ interface WhtRow {
   category: string | null;
 }
 
+interface PndSplitPreview {
+  period: { year: number; month: number };
+  pnd3: { count: number; base: string; wht: string };
+  pnd53: { count: number; base: string; wht: string };
+}
+
 function currentBangkokYearMonth() {
   const now = new Date();
   return { year: now.getFullYear(), month: now.getMonth() + 1 };
@@ -64,24 +100,43 @@ export default function TaxPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [vatRows, setVatRows] = useState<VatRow[]>([]);
   const [whtRows, setWhtRows] = useState<WhtRow[]>([]);
+  const [pndSplit, setPndSplit] = useState<PndSplitPreview | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function load() {
     setLoading(true);
     try {
       const q = `?year=${year}&month=${month}`;
-      const [d, v, w] = await Promise.all([
+      const [d, v, w, split] = await Promise.all([
         api<Dashboard>(`/tax/dashboard${q}`),
         api<{ items: VatRow[] }>(`/tax/vat-report${q}`),
         api<{ items: WhtRow[] }>(`/tax/wht-report${q}`),
+        api<PndSplitPreview>(`/tax/wht/pnd-summary/${year}/${month}/preview`),
       ]);
       setDashboard(d);
       setVatRows(v.items);
       setWhtRows(w.items);
+      setPndSplit(split);
     } catch (e: any) {
       toast.error(e.message ?? 'โหลดข้อมูลภาษีล้มเหลว');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function printCert(row: WhtRow) {
+    try {
+      await openAuthedPdf(`/tax/wht/certificate/${row.id}`);
+    } catch (e: any) {
+      toast.error(e.message ?? 'พิมพ์ 50 ทวิ ล้มเหลว');
+    }
+  }
+
+  async function printPnd(form: 'PND3' | 'PND53') {
+    try {
+      await openAuthedPdf(`/tax/wht/pnd-summary/${year}/${month}/${form}`);
+    } catch (e: any) {
+      toast.error(e.message ?? `พิมพ์ ${form === 'PND3' ? 'ภ.ง.ด.3' : 'ภ.ง.ด.53'} ล้มเหลว`);
     }
   }
 
@@ -172,7 +227,21 @@ export default function TaxPage() {
     { key: 'base', header: 'ฐานภาษี', align: 'right', numeric: true, render: (r) => formatThaiCurrency(r.baseAmount) },
     { key: 'rate', header: 'อัตรา', align: 'right', render: (r) => `${r.rate}%` },
     { key: 'wht', header: 'หัก ณ ที่จ่าย', align: 'right', numeric: true, render: (r) => formatThaiCurrency(r.whtAmount) },
-    { key: 'cert', header: 'เลขที่ 50 ทวิ', render: (r) => r.certNumber ?? '—' },
+    { key: 'cert', header: 'เลขที่ 50 ทวิ', render: (r) => <span className="font-mono text-[11px]">{r.certNumber ?? '—'}</span> },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      render: (r) =>
+        r.recordType === 'PAYABLE' ? (
+          <button
+            onClick={() => printCert(r)}
+            className="rounded-md border border-brand/40 bg-brand/5 px-2.5 py-1 text-[12px] text-brand hover:bg-brand/10"
+          >
+            พิมพ์ 50 ทวิ
+          </button>
+        ) : null,
+    },
   ];
 
   return (
@@ -279,17 +348,95 @@ export default function TaxPage() {
               emptyDescription="ใบกำกับภาษีที่ยืนยันแล้วจะปรากฏที่นี่อัตโนมัติ"
             />
           ) : (
-            <DataTable
-              columns={whtColumns}
-              rows={whtRows}
-              rowKey={(r) => r.id}
-              loading={loading}
-              emptyTitle="ยังไม่มี WHT record ในงวดนี้"
-              emptyDescription='หัก ณ ที่จ่ายในหน้า "รับ/จ่ายเงิน" จะปรากฏที่นี่อัตโนมัติ'
-            />
+            <>
+              {pndSplit && (pndSplit.pnd3.count > 0 || pndSplit.pnd53.count > 0) && (
+                <div className="mb-4 grid gap-3 md:grid-cols-2">
+                  <PndPrintCard
+                    title="ใบแนบ ภ.ง.ด.3"
+                    subtitle="สำหรับยื่นพร้อมส่งเงินภาษี (บุคคลธรรมดา)"
+                    count={pndSplit.pnd3.count}
+                    base={pndSplit.pnd3.base}
+                    wht={pndSplit.pnd3.wht}
+                    disabled={pndSplit.pnd3.count === 0}
+                    onPrint={() => printPnd('PND3')}
+                  />
+                  <PndPrintCard
+                    title="ใบแนบ ภ.ง.ด.53"
+                    subtitle="สำหรับยื่นพร้อมส่งเงินภาษี (นิติบุคคล)"
+                    count={pndSplit.pnd53.count}
+                    base={pndSplit.pnd53.base}
+                    wht={pndSplit.pnd53.wht}
+                    disabled={pndSplit.pnd53.count === 0}
+                    onPrint={() => printPnd('PND53')}
+                  />
+                </div>
+              )}
+              <DataTable
+                columns={whtColumns}
+                rows={whtRows}
+                rowKey={(r) => r.id}
+                loading={loading}
+                emptyTitle="ยังไม่มี WHT record ในงวดนี้"
+                emptyDescription='หัก ณ ที่จ่ายในหน้า "รับ/จ่ายเงิน" จะปรากฏที่นี่อัตโนมัติ'
+              />
+            </>
           )}
         </div>
       </div>
     </>
+  );
+}
+
+function PndPrintCard({
+  title,
+  subtitle,
+  count,
+  base,
+  wht,
+  disabled,
+  onPrint,
+}: {
+  title: string;
+  subtitle: string;
+  count: number;
+  base: string;
+  wht: string;
+  disabled: boolean;
+  onPrint: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[14.5px] font-semibold text-text">{title}</div>
+          <div className="mt-0.5 text-[11.5px] text-text-mute">{subtitle}</div>
+        </div>
+        <button
+          onClick={onPrint}
+          disabled={disabled}
+          className="rounded-md bg-brand-gradient px-3 py-1.5 text-[12.5px] font-medium text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          พิมพ์ใบแนบ
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-[12.5px]">
+        <div>
+          <div className="text-text-mute text-[11px]">ผู้รับ</div>
+          <div className="font-medium text-text">{count} ราย</div>
+        </div>
+        <div>
+          <div className="text-text-mute text-[11px]">ฐานภาษีรวม</div>
+          <div className="font-mono text-text">
+            {Number(base).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+          </div>
+        </div>
+        <div>
+          <div className="text-text-mute text-[11px]">ภาษีที่หักนำส่ง</div>
+          <div className="font-mono font-medium text-warn">
+            {Number(wht).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
