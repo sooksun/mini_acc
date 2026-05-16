@@ -8,7 +8,10 @@ import { clearSession } from '@/lib/auth';
 const NAV: { group: string; items: { href: string; label: string; pill?: number }[] }[] = [
   {
     group: 'ภาพรวม',
-    items: [{ href: '/dashboard', label: 'Dashboard' }],
+    items: [
+      { href: '/dashboard', label: 'Dashboard' },
+      { href: '/profit-loss', label: 'สรุปกำไรขาดทุน' },
+    ],
   },
   {
     group: 'ข้อมูลหลัก',

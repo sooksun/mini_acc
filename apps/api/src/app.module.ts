@@ -25,6 +25,7 @@ import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
 import { AiModule } from './ai/ai.module';
 import { BankModule } from './bank/bank.module';
 import { HealthModule } from './health/health.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { HealthModule } from './health/health.module';
     AiModule,
     BankModule,
     HealthModule,
+    ReportsModule,
   ],
   providers: [
     {
