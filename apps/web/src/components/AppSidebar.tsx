@@ -39,6 +39,14 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
     group: 'การเงิน',
     items: [
       { href: '/payments', label: 'รับ/จ่ายเงิน' },
+      { href: '/tax', label: 'ภาษี VAT/WHT' },
+    ],
+  },
+  {
+    group: 'ปิดงวด/Risk',
+    items: [
+      { href: '/risks', label: 'Risk Center' },
+      { href: '/closing', label: 'ปิดงวดบัญชี' },
     ],
   },
   {

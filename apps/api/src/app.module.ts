@@ -16,6 +16,9 @@ import { PdfModule } from './pdf/pdf.module';
 import { ExpenseReceiptsModule } from './expense-receipts/expense-receipts.module';
 import { JournalModule } from './journal/journal.module';
 import { PaymentsModule } from './payments/payments.module';
+import { TaxModule } from './tax/tax.module';
+import { RisksModule } from './risks/risks.module';
+import { ClosingModule } from './closing/closing.module';
 
 @Module({
   imports: [
@@ -32,11 +35,14 @@ import { PaymentsModule } from './payments/payments.module';
     LifecycleModule,
     PartnersModule,
     ProductsModule,
+    TaxModule,
     SalesModule,
     PdfModule,
     JournalModule,
     ExpenseReceiptsModule,
     PaymentsModule,
+    RisksModule,
+    ClosingModule,
   ],
   providers: [
     {

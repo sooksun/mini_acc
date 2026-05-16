@@ -22,6 +22,7 @@ import { sniffMime } from './mime-sniff';
 import { validateExpenseTransition } from './transitions';
 import { JournalService } from '../journal/journal.service';
 import { ACCOUNTS, expenseAccountForCategory } from '../journal/accounts';
+import { VatService } from '../tax/vat.service';
 
 type UploadFile = {
   originalname: string;
@@ -45,6 +46,7 @@ export class ExpenseReceiptsService {
     private prisma: PrismaService,
     private config: ConfigService,
     private journal: JournalService,
+    private vat: VatService,
   ) {}
 
   async upload(companyId: string, userId: string, dto: UploadExpenseReceiptDto, file?: UploadFile) {
@@ -425,6 +427,38 @@ export class ExpenseReceiptsService {
         sourceId: record.id,
         lines,
       });
+
+      // Snapshot INPUT VAT for tax reporting when the receipt has VAT.
+      // We use the vendor's snapshot info (or proposedVendor fallback) so the
+      // record survives the vendor row being renamed/deactivated later.
+      if (!receipt.vatAmount.isZero()) {
+        // Effective VAT rate inferred from baseAmount: vat / base * 100, rounded.
+        // Common case is 7%; the receipt may have a non-standard rate from
+        // earlier imports — preserve it rather than hard-coding.
+        const vatRate = receipt.subtotal.isZero()
+          ? new Prisma.Decimal(0)
+          : receipt.vatAmount.div(receipt.subtotal).mul(100).toDecimalPlaces(2);
+
+        // Pull vendor snapshot — vendor must exist at this point (vendorId guard above)
+        const vendor = await tx.partner.findUniqueOrThrow({
+          where: { id: receipt.vendorId! },
+          select: { nameTh: true, taxId: true },
+        });
+
+        await this.vat.recordWithTx(tx, {
+          companyId,
+          recordType: 'INPUT',
+          sourceType: 'EXPENSE_RECORD',
+          sourceId: record.id,
+          documentDate: receipt.documentDate ?? expenseDate,
+          documentNumber: receipt.documentNumber,
+          partnerName: vendor.nameTh,
+          partnerTaxId: vendor.taxId,
+          baseAmount: receipt.subtotal,
+          vatRate,
+          vatAmount: receipt.vatAmount,
+        });
+      }
 
       return tx.expenseReceipt.update({
         where: { id },
