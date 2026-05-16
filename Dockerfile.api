@@ -28,6 +28,14 @@ RUN pnpm --filter @hj/api build
 # --legacy did in v8, so we just drop it.
 RUN pnpm --filter @hj/api deploy --prod /out
 
+# pnpm deploy --prod doesn't reliably carry the prisma-generated client
+# (`.prisma/client/`) across the symlink boundary — at runtime
+# `Prisma.Decimal` ends up undefined and the app crashes on startup.
+# Copy the schema in and regenerate inside /out so the deployed bundle
+# is complete and self-contained.
+RUN mkdir -p /out/prisma && cp -r /repo/apps/api/prisma/. /out/prisma/
+RUN cd /out && npx --yes prisma@5.22.0 generate --schema=./prisma/schema.prisma
+
 # ============================================================
 # Stage 2: runner — Playwright base + Thai fonts
 # ============================================================
@@ -50,8 +58,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /out ./
-# Prisma needs the generated client + schema at runtime
-COPY --from=builder /repo/apps/api/prisma ./prisma
+# prisma/ + the regenerated client are already inside /out — no extra COPY needed.
 
 # Non-root runtime user
 RUN useradd -r -u 1001 -g root hj && chown -R hj:root /app
