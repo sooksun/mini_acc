@@ -23,8 +23,10 @@ RUN pnpm --filter @hj/shared-types build
 RUN pnpm --filter @hj/api exec prisma generate
 RUN pnpm --filter @hj/api build
 
-# Bundle API with only production deps into /out (resolves pnpm symlinks)
-RUN pnpm --filter @hj/api deploy --prod --legacy /out
+# Bundle API with only production deps into /out (resolves pnpm symlinks).
+# pnpm 9.x removed the --legacy flag; the default behaviour now matches what
+# --legacy did in v8, so we just drop it.
+RUN pnpm --filter @hj/api deploy --prod /out
 
 # ============================================================
 # Stage 2: runner — Playwright base + Thai fonts

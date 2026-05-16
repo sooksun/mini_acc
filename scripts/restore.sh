@@ -1,14 +1,10 @@
 #!/bin/sh
 # ============================================================
-# Restore DB from a backup file
+# Restore DB from a backup file. Reads DATABASE_URL like backup.sh.
 #
 # Usage (on host):
-#   docker compose -f docker-compose.prod.yml exec -T db sh -c \
-#     'gunzip < /backup/2026-05-16_0200.sql.gz \
-#       | mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" hjacc'
-#
-# Or, more interactively from inside the `backup` container:
-#   docker compose -f docker-compose.prod.yml exec backup sh /usr/local/bin/restore.sh /backup/2026-05-16_0200.sql.gz
+#   docker compose -f docker-compose.prod.yml exec -T backup \
+#     /usr/local/bin/restore.sh /backup/2026-05-16_0200.sql.gz
 # ============================================================
 set -eu
 
@@ -24,13 +20,25 @@ if [ ! -f "${FILE}" ]; then
     exit 1
 fi
 
-echo "[$(date +%FT%T)] Restoring ${FILE} → ${DB_NAME}@${DB_HOST}"
+: "${DATABASE_URL:?DATABASE_URL not set}"
+
+URL_NOSCHEME=$(echo "$DATABASE_URL" | sed -E 's#^mysql://##')
+CREDS=$(echo "$URL_NOSCHEME" | cut -d@ -f1)
+HOSTDB=$(echo "$URL_NOSCHEME" | cut -d@ -f2)
+DB_USER=$(echo "$CREDS" | cut -d: -f1)
+DB_PASSWORD=$(echo "$CREDS" | cut -d: -f2-)
+HOSTPORT=$(echo "$HOSTDB" | cut -d/ -f1)
+DB_NAME=$(echo "$HOSTDB" | cut -d/ -f2 | cut -d? -f1)
+DB_HOST=$(echo "$HOSTPORT" | cut -d: -f1)
+DB_PORT=$(echo "$HOSTPORT" | grep -q ':' && echo "$HOSTPORT" | cut -d: -f2 || echo 3306)
+
+echo "[$(date +%FT%T)] Restoring ${FILE} → ${DB_NAME}@${DB_HOST}:${DB_PORT}"
 echo "         This will OVERWRITE the current database. Ctrl-C to cancel."
 sleep 5
 
 gunzip < "${FILE}" \
   | mariadb \
-      -h "${DB_HOST}" \
+      -h "${DB_HOST}" -P "${DB_PORT}" \
       -u "${DB_USER}" \
       -p"${DB_PASSWORD}" \
       --default-character-set=utf8mb4 \
