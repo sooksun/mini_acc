@@ -10,7 +10,7 @@ import { api } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { formatThaiCurrency, formatThaiDateShort } from '@/lib/format';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 interface WhtRow {
   id: string;

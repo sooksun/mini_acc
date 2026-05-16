@@ -1,6 +1,8 @@
 import { getToken } from './auth';
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Default empty = same-origin (browser fetches /api/... on the page host).
+// For dev, set NEXT_PUBLIC_API_URL=http://localhost:4000 in apps/web/.env.local.
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 export class ApiError extends Error {
   constructor(public status: number, public body: unknown, message: string) {

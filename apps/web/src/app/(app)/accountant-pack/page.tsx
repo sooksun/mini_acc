@@ -76,7 +76,7 @@ export default function AccountantPackPage() {
       // The export endpoint streams a ZIP. We can't use apiBlob (which does
       // POST without body) cleanly here — manual fetch with token + JSON body.
       const token = getToken();
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
       const res = await fetch(`${baseUrl}/api/accountant-pack/export`, {
         method: 'POST',
         headers: {
