@@ -49,6 +49,7 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
     items: [
       { href: '/risks', label: 'Risk Center' },
       { href: '/closing', label: 'ปิดงวดบัญชี' },
+      { href: '/accountant-pack', label: 'Accountant Pack' },
     ],
   },
   {
