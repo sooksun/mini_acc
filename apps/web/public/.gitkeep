@@ -1,0 +1,4 @@
+# Place runtime static assets here (logo.png, favicon.ico, etc.).
+# logo.png is referenced by AppSidebar, login page, and the PDF templates
+# (via getLogoDataUrl in apps/api/src/pdf/pdf-templates/logo.ts).
+# Drop your real logo.png in this folder on the server before building.
