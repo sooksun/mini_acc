@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NumberingService } from '../../numbering/numbering.service';
 import { getBuddhistYear } from '../../numbering/be-year';
 import { validateTransition } from '../../lifecycle/validate-transition';
+import { VatService } from '../../tax/vat.service';
 import {
   CreateSalesDocumentInput,
   ListSalesDocumentsQuery,
@@ -24,6 +25,7 @@ export class SalesDocumentService {
   constructor(
     private prisma: PrismaService,
     private numbering: NumberingService,
+    private vat: VatService,
   ) {}
 
   async create(
@@ -128,6 +130,28 @@ export class SalesDocumentService {
         },
         include: { items: { orderBy: { lineNumber: 'asc' } } },
       });
+
+      // Snapshot OUTPUT VAT for tax-bearing document types. Non-VAT types
+      // (QUOTATION/DELIVERY_NOTE/INVOICE/RECEIPT) skip this — they may have
+      // a vatAmount set for total reporting but are not tax invoices.
+      if (
+        (type === 'TAX_INVOICE' || type === 'RECEIPT_TAX_INVOICE') &&
+        !updated.vatAmount.isZero()
+      ) {
+        await this.vat.recordWithTx(tx, {
+          companyId,
+          recordType: 'OUTPUT',
+          sourceType: 'SALES_DOCUMENT',
+          sourceId: updated.id,
+          documentDate: updated.documentDate,
+          documentNumber: updated.number,
+          partnerName: updated.customerSnapshotName,
+          partnerTaxId: updated.customerSnapshotTaxId,
+          baseAmount: updated.subtotal,
+          vatRate: updated.vatRate,
+          vatAmount: updated.vatAmount,
+        });
+      }
 
       return this.toDto(updated);
     });

@@ -1,0 +1,6 @@
+# Backup volume mount target.
+#
+# Daily mariadb-dump → /backup/YYYY-MM-DD_HHMM.sql.gz
+# Retention: 14 days (configurable in scripts/backup.sh).
+#
+# .sql.gz files in this directory are gitignored; only this .gitkeep is tracked.

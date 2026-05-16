@@ -1,4 +1,10 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+
+const THAI_TAX_ID = /^\d{13}$/;
+
+const stripTaxIdSeparators = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.replace(/[\s-]/g, '') : value;
 
 export class ApproveExpenseVendorDto {
   @IsOptional()
@@ -16,8 +22,9 @@ export class ApproveExpenseVendorDto {
   nameTh?: string;
 
   @IsOptional()
+  @Transform(stripTaxIdSeparators)
   @IsString()
-  @MaxLength(20)
+  @Matches(THAI_TAX_ID, { message: 'taxId ต้องเป็นเลขผู้เสียภาษีไทย 13 หลัก' })
   taxId?: string;
 
   @IsOptional()

@@ -9,6 +9,19 @@ build
 .env
 .env.*
 !.env.example
+!.env.test.example
+!.env.production.example
+.env.production
+
+# Production backups (volume-mounted into backup container)
+backup/*.sql
+backup/*.sql.gz
+!backup/.gitkeep
+
+# nginx TLS certificates — never commit private keys
+nginx/certs/*.pem
+nginx/certs/*.key
+!nginx/certs/.gitkeep
 
 *.log
 npm-debug.log*
@@ -22,6 +35,12 @@ coverage
 .nyc_output
 
 var/attachments
+var/test-attachments
 var/generated_pdfs
+var/pdf-samples
+# api ephemeral output (test attachments, generated/sample PDFs)
+apps/api/var/
+storage/
+*.tsbuildinfo
 
 prisma/migrations/dev.db*

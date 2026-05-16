@@ -14,6 +14,18 @@ import { ProductsModule } from './products/products.module';
 import { SalesModule } from './sales/sales.module';
 import { PdfModule } from './pdf/pdf.module';
 import { ExpenseReceiptsModule } from './expense-receipts/expense-receipts.module';
+import { JournalModule } from './journal/journal.module';
+import { PaymentsModule } from './payments/payments.module';
+import { TaxModule } from './tax/tax.module';
+import { RisksModule } from './risks/risks.module';
+import { ClosingModule } from './closing/closing.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
+import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
+import { AiModule } from './ai/ai.module';
+import { BankModule } from './bank/bank.module';
+import { HealthModule } from './health/health.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -30,9 +42,21 @@ import { ExpenseReceiptsModule } from './expense-receipts/expense-receipts.modul
     LifecycleModule,
     PartnersModule,
     ProductsModule,
+    TaxModule,
     SalesModule,
     PdfModule,
+    JournalModule,
     ExpenseReceiptsModule,
+    PaymentsModule,
+    RisksModule,
+    ClosingModule,
+    InventoryModule,
+    FixedAssetsModule,
+    AccountantPackModule,
+    AiModule,
+    BankModule,
+    HealthModule,
+    ReportsModule,
   ],
   providers: [
     {

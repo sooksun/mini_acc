@@ -7,11 +7,21 @@ import { Empty } from '@/components/ui/Empty';
 import { Modal } from '@/components/ui/Modal';
 import { PartnerPicker } from '@/components/ui/PartnerPicker';
 import { Spinner } from '@/components/ui/Spinner';
-import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { useToast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
+import { api, apiBlob } from '@/lib/api';
 import { getUser } from '@/lib/auth';
 import { formatThaiCurrency, formatThaiDateShort, formatThaiDateTime } from '@/lib/format';
+
+function checkAccount(item: ExpenseReceipt): { ok: boolean; reason: string } {
+  const amount = Number(item.grandTotal);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, reason: 'ต้องระบุยอดรวมมากกว่า 0 ก่อนลงรายจ่าย' };
+  }
+  if (!item.paidAt && !item.documentDate) {
+    return { ok: false, reason: 'ต้องระบุวันที่จ่ายหรือวันที่เอกสารก่อนลงรายจ่าย' };
+  }
+  return { ok: true, reason: '' };
+}
 
 interface Partner {
   id: string;
@@ -50,7 +60,7 @@ interface ExpenseReceipt {
 
 const STATUS: Record<ExpenseReceiptStatus, { label: string; cls: string }> = {
   UPLOADED: { label: 'รอเติมข้อมูล', cls: 'border-info/40 bg-info/10 text-info' },
-  PENDING_VENDOR_APPROVAL: { label: 'รออนุมัติผู้รับเงินใหม่', cls: 'border-warn/40 bg-warn/10 text-warn' },
+  PENDING_VENDOR_APPROVAL: { label: 'รออนุมัติผู้ขาย', cls: 'border-warn/40 bg-warn/10 text-warn' },
   READY_TO_ACCOUNT: { label: 'พร้อมลงรายจ่าย', cls: 'border-ok/40 bg-ok/10 text-ok' },
   ACCOUNTED: { label: 'ลงรายจ่ายแล้ว', cls: 'border-border bg-surface-3 text-text-soft' },
   REJECTED: { label: 'ปฏิเสธ', cls: 'border-bad/40 bg-bad/10 text-bad' },
@@ -123,7 +133,7 @@ export function ExpenseReceiptsPage() {
           address: receipt.proposedVendorAddress,
         }),
       });
-      toast.success('อนุมัติผู้รับเงินใหม่แล้ว');
+      toast.success('อนุมัติและเพิ่มผู้ขายแล้ว');
       load();
     } catch (e: any) {
       toast.error(e.message);
@@ -140,6 +150,24 @@ export function ExpenseReceiptsPage() {
     }
   }
 
+  async function viewFile(receipt: ExpenseReceipt) {
+    try {
+      const blob = await apiBlob(`/expense-receipts/${receipt.id}/file`);
+      const url = URL.createObjectURL(blob);
+      const popup = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!popup) {
+        toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+        URL.revokeObjectURL(url);
+        return;
+      }
+      // Browsers may render directly from the blob URL; revoke after the user has
+      // had time to load it. 60s is conservative.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e: any) {
+      toast.error(e.message ?? 'เปิดไฟล์ไม่สำเร็จ');
+    }
+  }
+
   const pendingCount = useMemo(
     () => items.filter((item) => item.status === 'PENDING_VENDOR_APPROVAL').length,
     [items],
@@ -153,7 +181,7 @@ export function ExpenseReceiptsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">อัปโหลดใบเสร็จรายจ่าย</h1>
             <p className="mt-1 text-[13px] text-text-mute">
-              เก็บหลักฐานรายจ่าย ตรวจผู้รับเงินใหม่/เก่า และบันทึกรายการจ่าย
+              เก็บหลักฐานรายจ่าย ตรวจผู้ขายใหม่/เก่า และบันทึกรายการจ่ายเข้ากับผู้ขาย
             </p>
           </div>
           {canUpload && (
@@ -168,7 +196,7 @@ export function ExpenseReceiptsPage() {
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <SummaryCard label="ทั้งหมดในมุมมองนี้" value={total.toString()} />
-          <SummaryCard label="รออนุมัติผู้รับเงินใหม่" value={pendingCount.toString()} tone="warn" />
+          <SummaryCard label="รออนุมัติผู้ขาย" value={pendingCount.toString()} tone="warn" />
           <SummaryCard
             label="พร้อมลงรายจ่าย"
             value={items.filter((item) => item.status === 'READY_TO_ACCOUNT').length.toString()}
@@ -180,7 +208,7 @@ export function ExpenseReceiptsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="ค้นหาผู้รับเงิน / เลขผู้เสียภาษี / เลขที่เอกสาร"
+            placeholder="ค้นหาผู้ขาย / เลขผู้เสียภาษี / เลขที่เอกสาร"
             className="w-96 rounded-md border border-border bg-surface px-3 py-2 text-[13.5px] outline-none focus:border-brand"
           />
           <select
@@ -208,7 +236,7 @@ export function ExpenseReceiptsPage() {
             <thead className="bg-surface-2 text-left text-text-soft">
               <tr>
                 <th className="px-4 py-3 font-medium">วันที่</th>
-                <th className="px-4 py-3 font-medium">ผู้รับเงิน</th>
+                <th className="px-4 py-3 font-medium">ผู้ขาย</th>
                 <th className="px-4 py-3 font-medium">เอกสาร</th>
                 <th className="px-4 py-3 text-right font-medium">ยอดสุทธิ</th>
                 <th className="px-4 py-3 font-medium">สถานะ</th>
@@ -233,7 +261,7 @@ export function ExpenseReceiptsPage() {
                       {item.documentDate ? formatThaiDateShort(item.documentDate) : formatThaiDateTime(item.createdAt)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium">{item.vendor?.nameTh ?? item.proposedVendorName ?? 'ยังไม่ระบุผู้รับเงิน'}</div>
+                      <div className="font-medium">{item.vendor?.nameTh ?? item.proposedVendorName ?? 'ยังไม่ระบุผู้ขาย'}</div>
                       <div className="font-mono text-[11px] text-text-mute">
                         {item.vendor?.taxId ?? item.proposedVendorTaxId ?? 'ไม่มีเลขผู้เสียภาษี'}
                       </div>
@@ -245,32 +273,16 @@ export function ExpenseReceiptsPage() {
                     <td className="px-4 py-3 text-right font-mono">{formatThaiCurrency(item.grandTotal)}</td>
                     <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
                     <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2">
-                        {canApproveVendor && item.status === 'PENDING_VENDOR_APPROVAL' && (
-                          <button
-                            onClick={() => approveNewVendor(item)}
-                            className="rounded-md border border-warn/40 bg-warn/5 px-2.5 py-1 text-[12px] text-warn hover:bg-warn/10"
-                          >
-                            อนุมัติผู้รับเงินใหม่
-                          </button>
-                        )}
-                        {canUpload && item.status !== 'ACCOUNTED' && item.status !== 'REJECTED' && (
-                          <button
-                            onClick={() => setLinking(item)}
-                            className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
-                          >
-                            ผูกผู้รับเงิน
-                          </button>
-                        )}
-                        {canAccount && item.status === 'READY_TO_ACCOUNT' && (
-                          <button
-                            onClick={() => accountReceipt(item)}
-                            className="rounded-md bg-brand px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90"
-                          >
-                            บันทึกรายจ่าย
-                          </button>
-                        )}
-                      </div>
+                      <RowActions
+                        item={item}
+                        canApproveVendor={canApproveVendor}
+                        canUpload={canUpload}
+                        canAccount={canAccount}
+                        onApproveNewVendor={() => approveNewVendor(item)}
+                        onLink={() => setLinking(item)}
+                        onAccount={() => accountReceipt(item)}
+                        onView={() => viewFile(item)}
+                      />
                     </td>
                   </tr>
                 ))
@@ -320,35 +332,88 @@ function StatusBadge({ status }: { status: ExpenseReceiptStatus }) {
   );
 }
 
+function RowActions({
+  item,
+  canApproveVendor,
+  canUpload,
+  canAccount,
+  onApproveNewVendor,
+  onLink,
+  onAccount,
+  onView,
+}: {
+  item: ExpenseReceipt;
+  canApproveVendor: boolean;
+  canUpload: boolean;
+  canAccount: boolean;
+  onApproveNewVendor: () => void;
+  onLink: () => void;
+  onAccount: () => void;
+  onView: () => void;
+}) {
+  // Mirror server-side guards (H4) so the user sees the failure reason before
+  // hitting the API and getting a 422 in a toast.
+  const preflight = checkAccount(item);
+  const showLink =
+    canUpload && (item.status === 'UPLOADED' || item.status === 'PENDING_VENDOR_APPROVAL');
+  const showReLink = canUpload && item.status === 'READY_TO_ACCOUNT';
+  const showApproveNew =
+    canApproveVendor && item.status === 'PENDING_VENDOR_APPROVAL' && !!item.proposedVendorName;
+  const showAccount = canAccount && item.status === 'READY_TO_ACCOUNT';
+
+  return (
+    <div className="flex justify-end gap-2">
+      <button
+        onClick={onView}
+        title="เปิดไฟล์ใบเสร็จในแท็บใหม่"
+        className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
+      >
+        ดูไฟล์
+      </button>
+      {showApproveNew && (
+        <button
+          onClick={onApproveNewVendor}
+          className="rounded-md border border-warn/40 bg-warn/5 px-2.5 py-1 text-[12px] text-warn hover:bg-warn/10"
+        >
+          อนุมัติผู้ขายใหม่
+        </button>
+      )}
+      {showLink && (
+        <button
+          onClick={onLink}
+          className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
+        >
+          ผูกผู้ขายเดิม
+        </button>
+      )}
+      {showReLink && (
+        <button
+          onClick={onLink}
+          title="เปลี่ยนผู้ขายที่ผูกไว้ก่อนลงรายจ่าย"
+          className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
+        >
+          เปลี่ยนผู้ขาย
+        </button>
+      )}
+      {showAccount && (
+        <button
+          onClick={onAccount}
+          disabled={!preflight.ok}
+          title={preflight.ok ? 'ลงรายจ่ายเข้าระบบ' : preflight.reason}
+          className="rounded-md bg-brand px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:opacity-50"
+        >
+          บันทึกรายจ่าย
+        </button>
+      )}
+    </div>
+  );
+}
+
 function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onClose: () => void; onUploaded: () => void }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [form, setForm] = useState(EMPTY_UPLOAD);
   const [saving, setSaving] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-
-  async function extractWithAi() {
-    if (!file) {
-      toast.error('กรุณาเลือกไฟล์ใบเสร็จก่อน');
-      return;
-    }
-
-    setExtracting(true);
-    try {
-      const body = new FormData();
-      body.set('file', file);
-      const res = await api<{ fields: typeof EMPTY_UPLOAD }>('/expense-receipts/ai-extract', {
-        method: 'POST',
-        body,
-      });
-      setForm((current) => ({ ...current, ...res.fields }));
-      toast.success('AI อ่านข้อมูลจากใบเสร็จแล้ว กรุณาตรวจทานก่อนอัปโหลด');
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setExtracting(false);
-    }
-  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -388,17 +453,9 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
             ยกเลิก
           </button>
           <button
-            type="button"
-            onClick={extractWithAi}
-            disabled={!file || extracting || saving}
-            className="rounded-md border border-brand/40 bg-brand/5 px-4 py-2 text-[13px] font-medium text-brand disabled:opacity-60"
-          >
-            {extracting ? 'AI กำลังอ่าน…' : 'อ่านไฟล์ด้วย AI'}
-          </button>
-          <button
             type="submit"
             form="upload-expense-receipt-form"
-            disabled={saving || extracting}
+            disabled={saving}
             className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
           >
             {saving ? 'กำลังอัปโหลด…' : 'อัปโหลด'}
@@ -415,12 +472,9 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13px]"
           />
-          <span className="mt-1 block text-[11.5px] text-text-mute">
-            เลือกไฟล์แล้วกด “อ่านไฟล์ด้วย AI” เพื่อ OCR และเติมข้อมูลอัตโนมัติ ไฟล์เดิมจะถูกแนบตอนกดอัปโหลดจริง
-          </span>
         </label>
-        <Field label="ชื่อผู้รับเงิน" value={form.vendorName} onChange={(vendorName) => setForm((v) => ({ ...v, vendorName }))} />
-        <Field label="เลขผู้เสียภาษีผู้รับเงิน" value={form.vendorTaxId} onChange={(vendorTaxId) => setForm((v) => ({ ...v, vendorTaxId }))} />
+        <Field label="ชื่อผู้ขาย" value={form.vendorName} onChange={(vendorName) => setForm((v) => ({ ...v, vendorName }))} />
+        <Field label="เลขผู้เสียภาษีผู้ขาย" value={form.vendorTaxId} onChange={(vendorTaxId) => setForm((v) => ({ ...v, vendorTaxId }))} />
         <Field label="สาขา" value={form.vendorBranch} onChange={(vendorBranch) => setForm((v) => ({ ...v, vendorBranch }))} />
         <Field label="เลขที่เอกสาร" value={form.documentNumber} onChange={(documentNumber) => setForm((v) => ({ ...v, documentNumber }))} />
         <Field type="date" label="วันที่เอกสาร" value={form.documentDate} onChange={(documentDate) => setForm((v) => ({ ...v, documentDate }))} />
@@ -431,7 +485,7 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
         <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
         <Field label="ยอดสุทธิ" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} />
         <label className="md:col-span-2">
-          <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้รับเงิน / หมายเหตุ</span>
+          <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย / หมายเหตุ</span>
           <textarea
             value={form.vendorAddress}
             onChange={(e) => setForm((v) => ({ ...v, vendorAddress: e.target.value }))}
@@ -452,6 +506,9 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
     setVendor(receipt?.vendor ?? null);
   }, [receipt]);
 
+  const isReLink = !!receipt?.vendor;
+  const unchanged = !!receipt?.vendor && vendor?.id === receipt.vendor.id;
+
   async function save() {
     if (!receipt || !vendor) return;
     setSaving(true);
@@ -460,7 +517,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
         method: 'POST',
         body: JSON.stringify({ vendorId: vendor.id }),
       });
-      toast.success('ผูกผู้รับเงินแล้ว');
+      toast.success(isReLink ? 'เปลี่ยนผู้ขายแล้ว' : 'ผูกผู้ขายแล้ว');
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -473,7 +530,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
     <Modal
       open={!!receipt}
       onClose={onClose}
-      title="ผูกใบเสร็จกับผู้รับเงินเดิม"
+      title={isReLink ? 'เปลี่ยนผู้ขายของใบเสร็จ' : 'ผูกใบเสร็จกับผู้ขายเดิม'}
       footer={
         <>
           <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-[13px]">
@@ -482,8 +539,9 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
           <button
             type="button"
             onClick={save}
-            disabled={!vendor || saving}
-            className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+            disabled={!vendor || saving || unchanged}
+            title={unchanged ? 'ยังไม่ได้เปลี่ยนผู้ขาย' : undefined}
+            className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             บันทึก
           </button>
@@ -491,7 +549,16 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
       }
     >
       <div className="space-y-3">
-        {receipt && (
+        {receipt && isReLink && (
+          <div className="rounded-md border border-info/40 bg-info/5 p-3 text-[13px] text-text-soft">
+            <div className="text-[11.5px] text-text-mute">ผู้ขายปัจจุบัน</div>
+            <div className="font-medium text-text">{receipt.vendor!.nameTh}</div>
+            <div className="font-mono text-[11px] text-text-mute">
+              {receipt.vendor!.taxId ?? 'ไม่มีเลขผู้เสียภาษี'}
+            </div>
+          </div>
+        )}
+        {receipt && !isReLink && (receipt.proposedVendorName || receipt.proposedVendorTaxId) && (
           <div className="rounded-md border border-border bg-surface-2 p-3 text-[13px] text-text-soft">
             ระบบพบจากไฟล์: {receipt.proposedVendorName ?? 'ไม่ระบุชื่อ'} · {receipt.proposedVendorTaxId ?? 'ไม่มีเลขผู้เสียภาษี'}
           </div>
@@ -500,7 +567,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
           type="VENDOR"
           value={vendor}
           onChange={setVendor}
-          placeholder="ค้นหาและเลือกผู้รับเงินเดิม"
+          placeholder={isReLink ? 'เลือกผู้ขายใหม่' : 'ค้นหาและเลือกผู้ขายเดิม'}
         />
       </div>
     </Modal>
@@ -523,17 +590,13 @@ function Field({
   return (
     <label>
       <span className="mb-1 block text-[12.5px] text-text-soft">{label}</span>
-      {type === 'date' ? (
-        <ThaiDatePicker value={value} onChange={(iso) => onChange(iso)} placeholder={placeholder ?? 'เลือกวันที่'} />
-      ) : (
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
-        />
-      )}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+      />
     </label>
   );
 }

@@ -8,7 +8,10 @@ import { clearSession } from '@/lib/auth';
 const NAV: { group: string; items: { href: string; label: string; pill?: number }[] }[] = [
   {
     group: 'ภาพรวม',
-    items: [{ href: '/dashboard', label: 'Dashboard' }],
+    items: [
+      { href: '/dashboard', label: 'Dashboard' },
+      { href: '/profit-loss', label: 'สรุปกำไรขาดทุน' },
+    ],
   },
   {
     group: 'ข้อมูลหลัก',
@@ -16,6 +19,8 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
       { href: '/customers', label: 'ลูกค้า' },
       { href: '/vendors', label: 'ผู้รับเงิน' },
       { href: '/products', label: 'สินค้า/บริการ' },
+      { href: '/inventory', label: 'คลังสินค้า' },
+      { href: '/assets', label: 'ทรัพย์สินถาวร' },
     ],
   },
   {
@@ -32,13 +37,33 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
   {
     group: 'รายจ่าย',
     items: [
+      { href: '/ai-inbox', label: 'AI Inbox' },
       { href: '/expenses/receipts', label: 'อัปโหลดใบเสร็จ' },
+    ],
+  },
+  {
+    group: 'การเงิน',
+    items: [
+      { href: '/payments', label: 'รับ/จ่ายเงิน' },
+      { href: '/bank', label: 'Bank Reconciliation' },
+      { href: '/tax', label: 'ภาษี VAT/WHT' },
+      { href: '/wht-certificates', label: 'หนังสือรับรอง 50 ทวิ' },
+    ],
+  },
+  {
+    group: 'ปิดงวด/Risk',
+    items: [
+      { href: '/risks', label: 'Risk Center' },
+      { href: '/closing', label: 'ปิดงวดบัญชี' },
+      { href: '/accountant-pack', label: 'Accountant Pack' },
     ],
   },
   {
     group: 'ตั้งค่า',
     items: [
       { href: '/settings/company', label: 'ตั้งค่าบริษัท' },
+      { href: '/settings/users', label: 'ผู้ใช้และสิทธิ์' },
+      { href: '/settings/document-numbering', label: 'เลขเอกสาร' },
       { href: '/settings/audit-log', label: 'Audit Log' },
     ],
   },

@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1.7
+
+# ============================================================
+# Stage 1: builder — Next.js standalone build
+# ============================================================
+FROM node:20-bookworm-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /repo
+
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY packages/shared-types/package.json packages/shared-types/
+
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm --filter @hj/shared-types build
+
+# NEXT_OUTPUT=standalone activates output:'standalone' in next.config.mjs
+# NEXT_PUBLIC_API_URL must be baked at build time (Next.js inlines public envs)
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+ENV NEXT_OUTPUT=standalone
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN pnpm --filter @hj/web build
+
+# ============================================================
+# Stage 2: runner — minimal Node + standalone bundle
+# ============================================================
+FROM node:20-bookworm-slim AS runner
+
+ENV NODE_ENV=production \
+    TZ=Asia/Bangkok \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Bangkok /etc/localtime \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+WORKDIR /app
+
+# Next.js standalone output layout for pnpm monorepo:
+#   apps/web/.next/standalone/        ← server.js + minimal node_modules
+#   apps/web/.next/standalone/apps/web/server.js
+#   apps/web/.next/static/             ← copied to apps/web/.next/static
+#   apps/web/public/                   ← copied to apps/web/public
+COPY --from=builder /repo/apps/web/.next/standalone ./
+COPY --from=builder /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /repo/apps/web/public ./apps/web/public
+
+RUN useradd -r -u 1001 -g root nextjs && chown -R nextjs:root /app
+USER nextjs
+
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD node -e "fetch('http://localhost:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+CMD ["node", "apps/web/server.js"]

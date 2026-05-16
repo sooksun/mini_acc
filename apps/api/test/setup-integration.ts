@@ -18,10 +18,27 @@ export interface TestEnv {
 }
 
 const TABLES_FK_DEPENDENT_ORDER = [
+  // Phase 2 children first (depend on Payment / JournalEntry / Project / etc.)
+  'BankStatementLine',
+  'WithholdingTaxRecord',
+  'JournalEntryLine',
+  'JournalEntry',
+  'InventoryMovement',
+  'FixedAsset',
+  'VatRecord',
+  'RiskItem',
+  'AiSuggestion',
+  'AccountingPeriod',
+  'Payment',
+  // Existing children
   'SalesDocumentItem',
   'GeneratedPdf',
   'Attachment',
+  'ExpenseRecord',
+  'ExpenseReceipt',
   'SalesDocument',
+  // Project depends on Partner, but ExpenseRecord/FixedAsset depend on Project → drop Project after those
+  'Project',
   'PartnerContact',
   'Partner',
   'Product',

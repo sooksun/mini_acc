@@ -34,6 +34,6 @@ import { PdfTemplateService } from './pdf-template.service';
     PdfGenerationService,
     PdfJobProcessor,
   ],
-  exports: [PdfGenerationService],
+  exports: [PdfGenerationService, PdfRendererService],
 })
 export class PdfModule {}
