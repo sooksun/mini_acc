@@ -21,9 +21,12 @@ COPY . .
 RUN pnpm --filter @hj/shared-types build
 
 # NEXT_OUTPUT=standalone activates output:'standalone' in next.config.mjs
-# NEXT_PUBLIC_API_URL must be baked at build time (Next.js inlines public envs)
-ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+# NEXT_PUBLIC_API_URL must be baked at build time (Next.js inlines public envs).
+# Pass an explicit empty string to use relative /api/... paths (same-origin
+# proxy via NPM). Do NOT default to http://localhost:4000 — the bundle would
+# inline that string and every browser would try to hit its own loopback.
+ARG NEXT_PUBLIC_API_URL=""
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_OUTPUT=standalone
 ENV NEXT_TELEMETRY_DISABLED=1
 
