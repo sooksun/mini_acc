@@ -23,6 +23,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
 import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
 import { AiModule } from './ai/ai.module';
+import { BankModule } from './bank/bank.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { AiModule } from './ai/ai.module';
     FixedAssetsModule,
     AccountantPackModule,
     AiModule,
+    BankModule,
   ],
   providers: [
     {

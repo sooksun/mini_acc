@@ -42,6 +42,7 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
     group: 'การเงิน',
     items: [
       { href: '/payments', label: 'รับ/จ่ายเงิน' },
+      { href: '/bank', label: 'Bank Reconciliation' },
       { href: '/tax', label: 'ภาษี VAT/WHT' },
     ],
   },
