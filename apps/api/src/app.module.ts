@@ -19,6 +19,8 @@ import { PaymentsModule } from './payments/payments.module';
 import { TaxModule } from './tax/tax.module';
 import { RisksModule } from './risks/risks.module';
 import { ClosingModule } from './closing/closing.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
 
 @Module({
   imports: [
@@ -43,6 +45,8 @@ import { ClosingModule } from './closing/closing.module';
     PaymentsModule,
     RisksModule,
     ClosingModule,
+    InventoryModule,
+    FixedAssetsModule,
   ],
   providers: [
     {

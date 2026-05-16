@@ -16,6 +16,8 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
       { href: '/customers', label: 'ลูกค้า' },
       { href: '/vendors', label: 'ผู้ขาย' },
       { href: '/products', label: 'สินค้า/บริการ' },
+      { href: '/inventory', label: 'คลังสินค้า' },
+      { href: '/assets', label: 'ทรัพย์สินถาวร' },
     ],
   },
   {
