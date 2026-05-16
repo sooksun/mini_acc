@@ -2,7 +2,7 @@ import type { PartnerType } from '@hj/shared-types';
 
 const MAP: Record<PartnerType, { label: string; cls: string }> = {
   CUSTOMER: { label: 'ลูกค้า', cls: 'border-info/40 bg-info/10 text-info' },
-  VENDOR: { label: 'ผู้ขาย', cls: 'border-warn/40 bg-warn/10 text-warn' },
+  VENDOR: { label: 'ผู้รับเงิน', cls: 'border-warn/40 bg-warn/10 text-warn' },
   BOTH: { label: 'ทั้งคู่', cls: 'border-brand/40 bg-brand/10 text-brand' },
 };
 

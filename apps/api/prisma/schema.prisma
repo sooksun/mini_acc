@@ -57,6 +57,15 @@ enum PartnerType {
   BOTH
 }
 
+enum VendorCategory {
+  SHOP
+  CONTRACTOR
+  EMPLOYEE
+  FREELANCE
+  GOVERNMENT
+  OTHER
+}
+
 enum ProductType {
   GOOD
   SERVICE
@@ -204,20 +213,21 @@ model DocumentNumberingCounter {
 }
 
 model Partner {
-  id          String      @id @default(cuid())
-  companyId   String
-  type        PartnerType @default(CUSTOMER)
-  code        String?     @db.VarChar(32)
-  nameTh      String      @db.VarChar(200)
-  nameEn      String?     @db.VarChar(200)
-  taxId       String?     @db.VarChar(20)
-  branch      String?     @db.VarChar(50)
-  address     String?     @db.Text
-  phone       String?     @db.VarChar(50)
-  email       String?     @db.VarChar(120)
-  website     String?     @db.VarChar(200)
-  note        String?     @db.Text
-  isActive    Boolean     @default(true)
+  id             String          @id @default(cuid())
+  companyId      String
+  type           PartnerType     @default(CUSTOMER)
+  vendorCategory VendorCategory?
+  code           String?         @db.VarChar(32)
+  nameTh         String          @db.VarChar(200)
+  nameEn         String?         @db.VarChar(200)
+  taxId          String?         @db.VarChar(20)
+  branch         String?         @db.VarChar(50)
+  address        String?         @db.Text
+  phone          String?         @db.VarChar(50)
+  email          String?         @db.VarChar(120)
+  website        String?         @db.VarChar(200)
+  note           String?         @db.Text
+  isActive       Boolean         @default(true)
 
   company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   contacts PartnerContact[]

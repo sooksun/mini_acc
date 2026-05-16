@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `partner` ADD COLUMN `vendorCategory` ENUM('SHOP', 'CONTRACTOR', 'EMPLOYEE', 'FREELANCE', 'GOVERNMENT', 'OTHER') NULL;

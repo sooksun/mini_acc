@@ -6,6 +6,7 @@ import { AppTopbar } from '@/components/AppTopbar';
 import { Spinner } from '@/components/ui/Spinner';
 import { Empty } from '@/components/ui/Empty';
 import { PartnerTypeBadge } from '@/components/ui/PartnerTypeBadge';
+import { VendorCategoryBadge } from '@/components/ui/VendorCategoryBadge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
@@ -15,6 +16,7 @@ import { PartnerForm } from './PartnerForm';
 interface Partner {
   id: string;
   type: PartnerType;
+  vendorCategory: string | null;
   code: string | null;
   nameTh: string;
   taxId: string | null;
@@ -98,7 +100,7 @@ export function PartnersList({ mode, title, description }: PartnersListProps) {
               }}
               className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
             >
-              + เพิ่ม{mode === 'CUSTOMER' ? 'ลูกค้า' : 'ผู้ขาย'}ใหม่
+              + เพิ่ม{mode === 'CUSTOMER' ? 'ลูกค้า' : 'ผู้รับเงิน'}ใหม่
             </button>
           )}
         </div>
@@ -167,7 +169,14 @@ export function PartnersList({ mode, title, description }: PartnersListProps) {
                           <div className="text-[11px] text-bad">ปิดการใช้งาน</div>
                         )}
                       </td>
-                      <td className="px-4 py-3"><PartnerTypeBadge type={p.type} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <PartnerTypeBadge type={p.type} />
+                          {p.vendorCategory && (p.type === 'VENDOR' || p.type === 'BOTH') && (
+                            <VendorCategoryBadge category={p.vendorCategory as any} />
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 font-mono text-[12px] text-text-soft">{p.taxId ?? '—'}</td>
                       <td className="px-4 py-3 text-text-soft">{p.phone ?? '—'}</td>
                       <td className="px-4 py-3 text-text-soft">

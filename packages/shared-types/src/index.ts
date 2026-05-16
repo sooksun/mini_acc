@@ -48,6 +48,17 @@ export const PartnerType = {
 } as const;
 export type PartnerType = (typeof PartnerType)[keyof typeof PartnerType];
 
+/** ประเภทผู้รับเงิน — ใช้เมื่อ PartnerType เป็น VENDOR หรือ BOTH */
+export const VendorCategory = {
+  SHOP: 'SHOP',           // ร้านค้า/ผู้ขาย
+  CONTRACTOR: 'CONTRACTOR', // ผู้รับจ้าง
+  EMPLOYEE: 'EMPLOYEE',   // ลูกจ้าง/พนักงาน
+  FREELANCE: 'FREELANCE', // ฟรีแลนซ์
+  GOVERNMENT: 'GOVERNMENT', // หน่วยงานรัฐ
+  OTHER: 'OTHER',         // อื่น ๆ
+} as const;
+export type VendorCategory = (typeof VendorCategory)[keyof typeof VendorCategory];
+
 export const ProductType = {
   GOOD: 'GOOD',
   SERVICE: 'SERVICE',

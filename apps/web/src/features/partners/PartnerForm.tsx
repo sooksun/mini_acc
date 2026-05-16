@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { PartnerType } from '@hj/shared-types';
 import { Modal } from '@/components/ui/Modal';
+import { VendorCategoryBadge, VENDOR_CATEGORY_OPTIONS } from '@/components/ui/VendorCategoryBadge';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
 
@@ -16,6 +17,7 @@ interface ContactInput {
 
 interface FormState {
   type: PartnerType;
+  vendorCategory: string;
   code: string;
   nameTh: string;
   nameEn: string;
@@ -32,6 +34,7 @@ interface FormState {
 
 const empty = (defaultType: PartnerType): FormState => ({
   type: defaultType,
+  vendorCategory: '',
   code: '', nameTh: '', nameEn: '', taxId: '', branch: '',
   address: '', phone: '', email: '', website: '', note: '',
   contacts: [],
@@ -65,6 +68,7 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
       .then((p) => {
         setForm({
           type: p.type,
+          vendorCategory: p.vendorCategory ?? '',
           code: p.code ?? '',
           nameTh: p.nameTh,
           nameEn: p.nameEn ?? '',
@@ -95,6 +99,7 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
     setSaving(true);
     const payload = {
       type: form.type,
+      vendorCategory: form.vendorCategory || undefined,
       code: form.code || undefined,
       nameTh: form.nameTh,
       nameEn: form.nameEn || undefined,
@@ -146,7 +151,7 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
     <Modal
       open={open}
       onClose={onClose}
-      title={partnerId ? 'แก้ไขข้อมูล' : 'เพิ่ม' + (defaultType === 'CUSTOMER' ? 'ลูกค้า' : defaultType === 'VENDOR' ? 'ผู้ขาย' : 'คู่ค้า')}
+      title={partnerId ? 'แก้ไขข้อมูล' : 'เพิ่ม' + (defaultType === 'CUSTOMER' ? 'ลูกค้า' : defaultType === 'VENDOR' ? 'ผู้รับเงิน' : 'คู่ค้า')}
       size="lg"
       footer={
         <>
@@ -179,14 +184,14 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
             </div>
           )}
           <div className="grid grid-cols-3 gap-3">
-            <Field label="ประเภท">
+            <Field label="ประเภทคู่ค้า">
               <select
                 value={form.type}
                 onChange={(e) => setForm({ ...form, type: e.target.value as PartnerType })}
                 className={inputCls}
               >
                 <option value="CUSTOMER">ลูกค้า</option>
-                <option value="VENDOR">ผู้ขาย</option>
+                <option value="VENDOR">ผู้รับเงิน</option>
                 <option value="BOTH">ทั้งคู่</option>
               </select>
             </Field>
@@ -197,6 +202,25 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
               <input value={form.taxId} onChange={(e) => setForm({ ...form, taxId: e.target.value })} className={`${inputCls} font-mono`} maxLength={20} />
             </Field>
           </div>
+          {(form.type === 'VENDOR' || form.type === 'BOTH') && (
+            <Field label="ประเภทผู้รับเงิน">
+              <select
+                value={form.vendorCategory}
+                onChange={(e) => setForm({ ...form, vendorCategory: e.target.value })}
+                className={inputCls}
+              >
+                <option value="">— ไม่ระบุ —</option>
+                {VENDOR_CATEGORY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              {form.vendorCategory && (
+                <div className="mt-1">
+                  <VendorCategoryBadge category={form.vendorCategory as any} />
+                </div>
+              )}
+            </Field>
+          )}
           <Field label="ชื่อภาษาไทย" required>
             <input
               required

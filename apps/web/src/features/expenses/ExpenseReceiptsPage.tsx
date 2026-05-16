@@ -7,6 +7,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Modal } from '@/components/ui/Modal';
 import { PartnerPicker } from '@/components/ui/PartnerPicker';
 import { Spinner } from '@/components/ui/Spinner';
+import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
@@ -49,7 +50,7 @@ interface ExpenseReceipt {
 
 const STATUS: Record<ExpenseReceiptStatus, { label: string; cls: string }> = {
   UPLOADED: { label: 'รอเติมข้อมูล', cls: 'border-info/40 bg-info/10 text-info' },
-  PENDING_VENDOR_APPROVAL: { label: 'รออนุมัติผู้ขาย', cls: 'border-warn/40 bg-warn/10 text-warn' },
+  PENDING_VENDOR_APPROVAL: { label: 'รออนุมัติผู้รับเงินใหม่', cls: 'border-warn/40 bg-warn/10 text-warn' },
   READY_TO_ACCOUNT: { label: 'พร้อมลงรายจ่าย', cls: 'border-ok/40 bg-ok/10 text-ok' },
   ACCOUNTED: { label: 'ลงรายจ่ายแล้ว', cls: 'border-border bg-surface-3 text-text-soft' },
   REJECTED: { label: 'ปฏิเสธ', cls: 'border-bad/40 bg-bad/10 text-bad' },
@@ -122,7 +123,7 @@ export function ExpenseReceiptsPage() {
           address: receipt.proposedVendorAddress,
         }),
       });
-      toast.success('อนุมัติและเพิ่มผู้ขายแล้ว');
+      toast.success('อนุมัติผู้รับเงินใหม่แล้ว');
       load();
     } catch (e: any) {
       toast.error(e.message);
@@ -152,7 +153,7 @@ export function ExpenseReceiptsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">อัปโหลดใบเสร็จรายจ่าย</h1>
             <p className="mt-1 text-[13px] text-text-mute">
-              เก็บหลักฐานรายจ่าย ตรวจผู้ขายใหม่/เก่า และบันทึกรายการจ่ายเข้ากับผู้ขาย
+              เก็บหลักฐานรายจ่าย ตรวจผู้รับเงินใหม่/เก่า และบันทึกรายการจ่าย
             </p>
           </div>
           {canUpload && (
@@ -167,7 +168,7 @@ export function ExpenseReceiptsPage() {
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <SummaryCard label="ทั้งหมดในมุมมองนี้" value={total.toString()} />
-          <SummaryCard label="รออนุมัติผู้ขาย" value={pendingCount.toString()} tone="warn" />
+          <SummaryCard label="รออนุมัติผู้รับเงินใหม่" value={pendingCount.toString()} tone="warn" />
           <SummaryCard
             label="พร้อมลงรายจ่าย"
             value={items.filter((item) => item.status === 'READY_TO_ACCOUNT').length.toString()}
@@ -179,7 +180,7 @@ export function ExpenseReceiptsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="ค้นหาผู้ขาย / เลขผู้เสียภาษี / เลขที่เอกสาร"
+            placeholder="ค้นหาผู้รับเงิน / เลขผู้เสียภาษี / เลขที่เอกสาร"
             className="w-96 rounded-md border border-border bg-surface px-3 py-2 text-[13.5px] outline-none focus:border-brand"
           />
           <select
@@ -207,7 +208,7 @@ export function ExpenseReceiptsPage() {
             <thead className="bg-surface-2 text-left text-text-soft">
               <tr>
                 <th className="px-4 py-3 font-medium">วันที่</th>
-                <th className="px-4 py-3 font-medium">ผู้ขาย</th>
+                <th className="px-4 py-3 font-medium">ผู้รับเงิน</th>
                 <th className="px-4 py-3 font-medium">เอกสาร</th>
                 <th className="px-4 py-3 text-right font-medium">ยอดสุทธิ</th>
                 <th className="px-4 py-3 font-medium">สถานะ</th>
@@ -232,7 +233,7 @@ export function ExpenseReceiptsPage() {
                       {item.documentDate ? formatThaiDateShort(item.documentDate) : formatThaiDateTime(item.createdAt)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium">{item.vendor?.nameTh ?? item.proposedVendorName ?? 'ยังไม่ระบุผู้ขาย'}</div>
+                      <div className="font-medium">{item.vendor?.nameTh ?? item.proposedVendorName ?? 'ยังไม่ระบุผู้รับเงิน'}</div>
                       <div className="font-mono text-[11px] text-text-mute">
                         {item.vendor?.taxId ?? item.proposedVendorTaxId ?? 'ไม่มีเลขผู้เสียภาษี'}
                       </div>
@@ -250,7 +251,7 @@ export function ExpenseReceiptsPage() {
                             onClick={() => approveNewVendor(item)}
                             className="rounded-md border border-warn/40 bg-warn/5 px-2.5 py-1 text-[12px] text-warn hover:bg-warn/10"
                           >
-                            อนุมัติผู้ขายใหม่
+                            อนุมัติผู้รับเงินใหม่
                           </button>
                         )}
                         {canUpload && item.status !== 'ACCOUNTED' && item.status !== 'REJECTED' && (
@@ -258,7 +259,7 @@ export function ExpenseReceiptsPage() {
                             onClick={() => setLinking(item)}
                             className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
                           >
-                            ผูกผู้ขาย
+                            ผูกผู้รับเงิน
                           </button>
                         )}
                         {canAccount && item.status === 'READY_TO_ACCOUNT' && (
@@ -324,6 +325,30 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
   const [file, setFile] = useState<File | null>(null);
   const [form, setForm] = useState(EMPTY_UPLOAD);
   const [saving, setSaving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+
+  async function extractWithAi() {
+    if (!file) {
+      toast.error('กรุณาเลือกไฟล์ใบเสร็จก่อน');
+      return;
+    }
+
+    setExtracting(true);
+    try {
+      const body = new FormData();
+      body.set('file', file);
+      const res = await api<{ fields: typeof EMPTY_UPLOAD }>('/expense-receipts/ai-extract', {
+        method: 'POST',
+        body,
+      });
+      setForm((current) => ({ ...current, ...res.fields }));
+      toast.success('AI อ่านข้อมูลจากใบเสร็จแล้ว กรุณาตรวจทานก่อนอัปโหลด');
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -363,9 +388,17 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
             ยกเลิก
           </button>
           <button
+            type="button"
+            onClick={extractWithAi}
+            disabled={!file || extracting || saving}
+            className="rounded-md border border-brand/40 bg-brand/5 px-4 py-2 text-[13px] font-medium text-brand disabled:opacity-60"
+          >
+            {extracting ? 'AI กำลังอ่าน…' : 'อ่านไฟล์ด้วย AI'}
+          </button>
+          <button
             type="submit"
             form="upload-expense-receipt-form"
-            disabled={saving}
+            disabled={saving || extracting}
             className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
           >
             {saving ? 'กำลังอัปโหลด…' : 'อัปโหลด'}
@@ -382,9 +415,12 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13px]"
           />
+          <span className="mt-1 block text-[11.5px] text-text-mute">
+            เลือกไฟล์แล้วกด “อ่านไฟล์ด้วย AI” เพื่อ OCR และเติมข้อมูลอัตโนมัติ ไฟล์เดิมจะถูกแนบตอนกดอัปโหลดจริง
+          </span>
         </label>
-        <Field label="ชื่อผู้ขาย" value={form.vendorName} onChange={(vendorName) => setForm((v) => ({ ...v, vendorName }))} />
-        <Field label="เลขผู้เสียภาษีผู้ขาย" value={form.vendorTaxId} onChange={(vendorTaxId) => setForm((v) => ({ ...v, vendorTaxId }))} />
+        <Field label="ชื่อผู้รับเงิน" value={form.vendorName} onChange={(vendorName) => setForm((v) => ({ ...v, vendorName }))} />
+        <Field label="เลขผู้เสียภาษีผู้รับเงิน" value={form.vendorTaxId} onChange={(vendorTaxId) => setForm((v) => ({ ...v, vendorTaxId }))} />
         <Field label="สาขา" value={form.vendorBranch} onChange={(vendorBranch) => setForm((v) => ({ ...v, vendorBranch }))} />
         <Field label="เลขที่เอกสาร" value={form.documentNumber} onChange={(documentNumber) => setForm((v) => ({ ...v, documentNumber }))} />
         <Field type="date" label="วันที่เอกสาร" value={form.documentDate} onChange={(documentDate) => setForm((v) => ({ ...v, documentDate }))} />
@@ -395,7 +431,7 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
         <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
         <Field label="ยอดสุทธิ" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} />
         <label className="md:col-span-2">
-          <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย / หมายเหตุ</span>
+          <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้รับเงิน / หมายเหตุ</span>
           <textarea
             value={form.vendorAddress}
             onChange={(e) => setForm((v) => ({ ...v, vendorAddress: e.target.value }))}
@@ -424,7 +460,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
         method: 'POST',
         body: JSON.stringify({ vendorId: vendor.id }),
       });
-      toast.success('ผูกผู้ขายแล้ว');
+      toast.success('ผูกผู้รับเงินแล้ว');
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -437,7 +473,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
     <Modal
       open={!!receipt}
       onClose={onClose}
-      title="ผูกใบเสร็จกับผู้ขายเดิม"
+      title="ผูกใบเสร็จกับผู้รับเงินเดิม"
       footer={
         <>
           <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-[13px]">
@@ -464,7 +500,7 @@ function LinkVendorModal({ receipt, onClose, onSaved }: { receipt: ExpenseReceip
           type="VENDOR"
           value={vendor}
           onChange={setVendor}
-          placeholder="ค้นหาและเลือกผู้ขายเดิม"
+          placeholder="ค้นหาและเลือกผู้รับเงินเดิม"
         />
       </div>
     </Modal>
@@ -487,13 +523,17 @@ function Field({
   return (
     <label>
       <span className="mb-1 block text-[12.5px] text-text-soft">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
-      />
+      {type === 'date' ? (
+        <ThaiDatePicker value={value} onChange={(iso) => onChange(iso)} placeholder={placeholder ?? 'เลือกวันที่'} />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+        />
+      )}
     </label>
   );
 }

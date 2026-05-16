@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AppTopbar } from '@/components/AppTopbar';
+import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { PartnerPicker } from '@/components/ui/PartnerPicker';
 import { ProductPicker } from '@/components/ui/ProductPicker';
 import { Money } from '@/components/ui/Money';
@@ -230,18 +231,11 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
                     <label className="mb-1 block text-[12px] text-text-soft">
                       วันที่เอกสาร <span className="text-bad">*</span>
                     </label>
-                    <input
-                      type="date"
-                      required
+                    <ThaiDatePicker
                       value={documentDate}
-                      onChange={(e) => setDocumentDate(e.target.value)}
-                      className={inputCls}
+                      onChange={setDocumentDate}
+                      required
                     />
-                    {documentDate && (
-                      <span className="mt-1 block text-[11px] text-text-mute">
-                        {formatThaiDate(documentDate + 'T00:00:00+07:00')}
-                      </span>
-                    )}
                     {meta.requireCustomerTaxId && company?.vatEffectiveDate && (
                       <span className="mt-1 block text-[11px] text-warn">
                         ออกได้ตั้งแต่ {formatThaiDate(company.vatEffectiveDate)}
@@ -249,12 +243,7 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
                     )}
                   </div>
                   <Field label="กำหนดยืนราคาถึง">
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className={inputCls}
-                    />
+                    <ThaiDatePicker value={dueDate} onChange={setDueDate} placeholder="เลือกวันหมดอายุ" />
                   </Field>
                   <Field label="อ้างอิง">
                     <input

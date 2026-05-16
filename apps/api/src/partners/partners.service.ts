@@ -22,6 +22,7 @@ export class PartnersService {
       data: {
         companyId,
         type: dto.type,
+        vendorCategory: dto.vendorCategory,
         code: dto.code,
         nameTh: dto.nameTh,
         nameEn: dto.nameEn,
@@ -105,6 +106,7 @@ export class PartnersService {
         where: { id },
         data: {
           type: dto.type,
+          vendorCategory: dto.vendorCategory,
           code: dto.code,
           nameTh: dto.nameTh,
           nameEn: dto.nameEn,

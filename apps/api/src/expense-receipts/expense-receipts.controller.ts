@@ -58,6 +58,20 @@ export class ExpenseReceiptsController {
     return this.expenseReceipts.upload(user.companyId, user.id, dto, file);
   }
 
+  @Post('ai-extract')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  @AuditAction('AI_EXTRACT_DOCUMENT', {
+    entityType: 'ExpenseReceipt',
+    getMetadata: (_req, res) => ({
+      sourceFile: res?.sourceFile?.name,
+      mimeType: res?.sourceFile?.mimeType,
+    }),
+  })
+  aiExtract(@UploadedFile() file?: any) {
+    return this.expenseReceipts.aiExtract(file);
+  }
+
   @Post(':id/link-vendor')
   @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
   @AuditAction('LINK_EXPENSE_VENDOR', {

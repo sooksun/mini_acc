@@ -9,12 +9,16 @@ import {
   MaxLength,
   ValidateNested,
 } from 'class-validator';
-import { PartnerType } from '@hj/shared-types';
+import { PartnerType, VendorCategory } from '@hj/shared-types';
 import { PartnerContactDto } from './partner-contact.dto';
 
 export class CreatePartnerDto {
   @IsEnum(PartnerType)
   type!: PartnerType;
+
+  @IsOptional()
+  @IsEnum(VendorCategory)
+  vendorCategory?: VendorCategory;
 
   @IsOptional()
   @IsString()

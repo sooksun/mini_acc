@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { DocumentStatus } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
+import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { Spinner } from '@/components/ui/Spinner';
 import { Empty } from '@/components/ui/Empty';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -106,19 +107,13 @@ export function SalesDocumentsList({ meta }: { meta: DocTypeMeta }) {
             <option value="LOCKED">ล็อก</option>
             <option value="VOIDED">ยกเลิก</option>
           </select>
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] outline-none focus:border-brand"
-          />
+          <div className="w-36">
+            <ThaiDatePicker value={dateFrom} onChange={setDateFrom} placeholder="จากวันที่" />
+          </div>
           <span className="text-[12px] text-text-mute">ถึง</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] outline-none focus:border-brand"
-          />
+          <div className="w-36">
+            <ThaiDatePicker value={dateTo} onChange={setDateTo} placeholder="ถึงวันที่" />
+          </div>
           <span className="ml-auto text-[12.5px] text-text-mute">{total} รายการ</span>
         </div>
 

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { VatStatus } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
+import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { api } from '@/lib/api';
 import { formatThaiDate } from '@/lib/format';
 import { getUser } from '@/lib/auth';
@@ -179,16 +180,10 @@ function NewStatusForm(props: { onCancel: () => void; onSaved: () => void }) {
       </label>
 
       <label className="mb-3 block">
-        <span className="mb-1 block text-[12px] text-text-soft">มีผลตั้งแต่ (ค.ศ.)</span>
-        <input
-          type="date"
-          required
-          value={effectiveFrom}
-          onChange={(e) => setEffectiveFrom(e.target.value)}
-          className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
-        />
+        <span className="mb-1 block text-[12px] text-text-soft">มีผลตั้งแต่ (พ.ศ.)</span>
+        <ThaiDatePicker value={effectiveFrom} onChange={setEffectiveFrom} required />
         <span className="mt-1 block text-[11px] text-text-mute">
-          ระบบจะเก็บเป็น UTC แต่แสดงเป็น พ.ศ. ทุกที่
+          แสดงเป็น พ.ศ. ระบบเก็บเป็น UTC
         </span>
       </label>
 

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -99,6 +100,72 @@ export class ExpenseReceiptsService {
     });
 
     return this.findOne(companyId, receipt.id);
+  }
+
+  async aiExtract(file?: UploadFile) {
+    if (!file) throw new BadRequestException('Receipt file is required');
+    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException('Only PDF, JPEG, PNG, or WEBP receipt files are supported');
+    }
+
+    const apiKey = this.config.get<string>('OPENROUTER_API_KEY')?.trim();
+    if (!apiKey) {
+      throw new ServiceUnavailableException('ยังไม่ได้ตั้งค่า OPENROUTER_API_KEY สำหรับ OCR ด้วย AI');
+    }
+
+    const model = this.config.get<string>('OPENROUTER_MODEL_EXTRACT')?.trim()
+      || 'anthropic/claude-sonnet-4';
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    const content: any[] = [
+      {
+        type: 'text',
+        text: [
+          'อ่านข้อความจากใบเสร็จ/ใบกำกับภาษีซื้อภาษาไทย แล้วคืน JSON เท่านั้น',
+          'schema: {"vendorName":"","vendorTaxId":"","vendorBranch":"","vendorAddress":"","documentNumber":"","documentDate":"","paidAt":"","category":"","subtotal":"","vatAmount":"","withholdingTaxAmount":"","grandTotal":"","note":""}',
+          'วันที่ให้ใช้รูปแบบ YYYY-MM-DD ค.ศ. ถ้าไม่แน่ใจให้เว้นว่าง',
+          'จำนวนเงินให้ใช้เลขทศนิยม 2 ตำแหน่ง ไม่ใส่ comma หรือสัญลักษณ์เงิน',
+          'category ให้สรุปเป็นหมวดรายจ่ายสั้น ๆ เช่น ค่าซอฟต์แวร์ ค่าเดินทาง ค่าวัสดุสำนักงาน',
+          'ถ้าฟิลด์ใดอ่านไม่ได้ให้คืน empty string ห้ามเดา',
+        ].join('\n'),
+      },
+      file.mimetype.startsWith('image/')
+        ? { type: 'image_url', image_url: { url: dataUrl } }
+        : { type: 'file', file: { filename: file.originalname, file_data: dataUrl } },
+    ];
+
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'http://localhost:3000',
+        'X-Title': 'HJ Account AI',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        temperature: 0,
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    const body = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new ServiceUnavailableException(
+        body?.error?.message ?? 'AI OCR service unavailable',
+      );
+    }
+
+    const raw = body?.choices?.[0]?.message?.content;
+    const extracted = this.parseAiJson(raw);
+    return {
+      fields: this.normalizeAiFields(extracted),
+      sourceFile: {
+        name: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+      },
+    };
   }
 
   async list(companyId: string, dto: ListExpenseReceiptsDto) {
@@ -342,6 +409,50 @@ export class ExpenseReceiptsService {
   private blankToNull(value?: string | null) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : null;
+  }
+
+  private parseAiJson(raw: unknown) {
+    if (typeof raw !== 'string') return {};
+    const cleaned = raw
+      .trim()
+      .replace(/^```(?:json)?/i, '')
+      .replace(/```$/i, '')
+      .trim();
+    try {
+      return JSON.parse(cleaned) as Record<string, unknown>;
+    } catch {
+      throw new ServiceUnavailableException('AI OCR returned invalid JSON');
+    }
+  }
+
+  private normalizeAiFields(fields: Record<string, unknown>) {
+    const stringField = (key: string) =>
+      typeof fields[key] === 'string' ? fields[key].trim() : '';
+    const moneyField = (key: string) => stringField(key).replace(/,/g, '');
+    return {
+      vendorName: stringField('vendorName'),
+      vendorTaxId: stringField('vendorTaxId').replace(/[^\d]/g, ''),
+      vendorBranch: stringField('vendorBranch'),
+      vendorAddress: stringField('vendorAddress'),
+      documentNumber: stringField('documentNumber'),
+      documentDate: this.inputDateOrEmpty(stringField('documentDate')),
+      paidAt: this.inputDateOrEmpty(stringField('paidAt')),
+      category: stringField('category'),
+      subtotal: moneyField('subtotal'),
+      vatAmount: moneyField('vatAmount'),
+      withholdingTaxAmount: moneyField('withholdingTaxAmount'),
+      grandTotal: moneyField('grandTotal'),
+      note: stringField('note'),
+    };
+  }
+
+  private inputDateOrEmpty(value: string) {
+    if (!value) return '';
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().slice(0, 10);
   }
 
   private include() {
