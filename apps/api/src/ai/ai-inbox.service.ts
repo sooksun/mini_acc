@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { PDFParse } from 'pdf-parse';
 import type { AiSuggestionStatus } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { sniffMime } from '../expense-receipts/mime-sniff';
@@ -81,11 +82,10 @@ export class AiInboxService {
     const { relativePath, absolutePath } = await this.persistFile(companyId, file);
     let committed = false;
     try {
-      // Run extraction. Today we only have filename + maybe stub. PDF text
-      // extraction can be added later; we still create the suggestion so the
-      // operator can fill the fields manually if the AI couldn't see them.
+      const text = await this.extractText(file.buffer, detected);
       const result = await this.openrouter.extractExpense({
         fileName: file.originalname,
+        text,
       });
 
       const payload: AiSuggestionPayload = {
@@ -292,6 +292,29 @@ export class AiInboxService {
       };
     } catch {
       throw new NotFoundException('Staged file not found on disk');
+    }
+  }
+
+  /**
+   * Extract text content so the LLM has something to read. รองรับเฉพาะ PDF;
+   * image (jpeg/png/webp) คืน undefined — รอ vision phase หรือ OCR.
+   * ไม่ throw ถ้า extract ไม่ได้ — กลับ undefined แล้วให้ LLM ใช้ mock/filename
+   * ตามเดิม.
+   */
+  private async extractText(buffer: Buffer, mime: string): Promise<string | undefined> {
+    if (mime !== 'application/pdf') return undefined;
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    try {
+      const result = await parser.getText();
+      const text = result.text?.trim();
+      return text && text.length > 0 ? text : undefined;
+    } catch (err) {
+      this.logger.warn(
+        `pdf-parse failed (${err instanceof Error ? err.message : String(err)}) — proceeding without text`,
+      );
+      return undefined;
+    } finally {
+      await parser.destroy().catch(() => undefined);
     }
   }
 

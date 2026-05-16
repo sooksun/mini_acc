@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+function stripJsonFence(content: string): string {
+  const trimmed = content.trim();
+  const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  return fence?.[1]?.trim() ?? trimmed;
+}
+
 export interface ExtractedExpense {
   vendorName?: string;
   vendorTaxId?: string;
@@ -92,7 +98,11 @@ ${(opts.text ?? '(no text extracted)').slice(0, 8000)}`;
       const content = data.choices?.[0]?.message?.content;
       if (!content) throw new Error('OpenRouter returned no content');
 
-      const parsed = JSON.parse(content) as ExtractedExpense & { confidence?: number };
+      // Claude (via OpenRouter) มัก wrap JSON ด้วย ```json ... ``` แม้ใส่
+      // response_format: json_object — ดึง JSON ออกก่อน parse.
+      const parsed = JSON.parse(stripJsonFence(content)) as ExtractedExpense & {
+        confidence?: number;
+      };
       const { confidence, ...payload } = parsed;
       return {
         payload,
