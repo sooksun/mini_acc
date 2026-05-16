@@ -5,6 +5,7 @@ const nextConfig = {
   experimental: {
     typedRoutes: true,
   },
+  output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
 };
 
 export default nextConfig;

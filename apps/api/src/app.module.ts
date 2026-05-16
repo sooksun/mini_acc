@@ -24,6 +24,7 @@ import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
 import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
 import { AiModule } from './ai/ai.module';
 import { BankModule } from './bank/bank.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { BankModule } from './bank/bank.module';
     AccountantPackModule,
     AiModule,
     BankModule,
+    HealthModule,
   ],
   providers: [
     {

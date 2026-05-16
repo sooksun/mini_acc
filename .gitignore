@@ -10,6 +10,18 @@ build
 .env.*
 !.env.example
 !.env.test.example
+!.env.production.example
+.env.production
+
+# Production backups (volume-mounted into backup container)
+backup/*.sql
+backup/*.sql.gz
+!backup/.gitkeep
+
+# nginx TLS certificates — never commit private keys
+nginx/certs/*.pem
+nginx/certs/*.key
+!nginx/certs/.gitkeep
 
 *.log
 npm-debug.log*
