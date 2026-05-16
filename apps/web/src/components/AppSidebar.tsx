@@ -44,6 +44,7 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
       { href: '/payments', label: 'รับ/จ่ายเงิน' },
       { href: '/bank', label: 'Bank Reconciliation' },
       { href: '/tax', label: 'ภาษี VAT/WHT' },
+      { href: '/wht-certificates', label: 'หนังสือรับรอง 50 ทวิ' },
     ],
   },
   {
