@@ -36,6 +36,12 @@ const NAV: { group: string; items: { href: string; label: string; pill?: number 
     ],
   },
   {
+    group: 'การเงิน',
+    items: [
+      { href: '/payments', label: 'รับ/จ่ายเงิน' },
+    ],
+  },
+  {
     group: 'ตั้งค่า',
     items: [
       { href: '/settings/company', label: 'ตั้งค่าบริษัท' },

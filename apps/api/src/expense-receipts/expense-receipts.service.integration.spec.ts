@@ -324,7 +324,7 @@ describe('ExpenseReceiptsService (integration)', () => {
       expect(accounted.status).toBe('ACCOUNTED');
     });
 
-    it('tolerates 0.01 rounding difference', async () => {
+    it('rejects even 0.01 rounding diff — journal needs exact Dr=Cr', async () => {
       const vendor = await makeVendor('ผู้ขาย rounding', '0000000020003');
       const receipt = await service.upload(
         env.seed.companyId,
@@ -334,18 +334,16 @@ describe('ExpenseReceiptsService (integration)', () => {
           subtotal: '100.00',
           vatAmount: '7.00',
           withholdingTaxAmount: '0',
-          grandTotal: '107.01', // off by exactly 0.01 — within tolerance
+          grandTotal: '107.01', // off by 0.01 — refused now that journal posts strictly
           paidAt: '2026-05-01',
         },
         fakePdf('h3-round.pdf', 'h3-round-1'),
       );
-      const accounted = await service.account(
-        env.seed.companyId,
-        env.seed.userId,
-        'OWNER',
-        receipt.id,
-      );
-      expect(accounted.status).toBe('ACCOUNTED');
+      await expect(
+        service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'AMOUNT_INCONSISTENT' }),
+      });
     });
   });
 
@@ -415,6 +413,76 @@ describe('ExpenseReceiptsService (integration)', () => {
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'VENDOR_CONSTRAINT_CONFLICT' }),
       });
+    });
+  });
+
+  describe('account() — P3 journal posting hook', () => {
+    it('posts a 3-line journal entry when WHT > 0', async () => {
+      const vendor = await makeVendor('ผู้ขาย journal-wht', '0000000050001');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1000',
+          vatAmount: '70',
+          withholdingTaxAmount: '10',
+          grandTotal: '1060', // 1000 + 70 - 10
+          paidAt: '2026-05-10',
+          category: 'ค่าซอฟต์แวร์',
+        },
+        fakePdf('je-wht.pdf', 'je-wht-1'),
+      );
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      const journals = await env.prisma.journalEntry.findMany({
+        where: { sourceType: 'EXPENSE_RECORD', sourceId: accounted.expenseRecord!.id },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(journals).toHaveLength(1);
+      const lines = journals[0]!.lines;
+      // Dr Expense 1000, Dr Input VAT 70, Cr Cash 1060, Cr WHT Payable 10
+      expect(lines).toHaveLength(4);
+      expect(lines[0]!.accountName).toBe('ค่าซอฟต์แวร์');
+      expect(lines[0]!.debit.toString()).toBe('1000');
+      expect(lines[1]!.debit.toString()).toBe('70');
+      expect(lines[2]!.credit.toString()).toBe('1060');
+      expect(lines[3]!.credit.toString()).toBe('10');
+      expect(journals[0]!.totalDebit.equals(journals[0]!.totalCredit)).toBe(true);
+    });
+
+    it('posts a 2-line journal entry when no VAT, no WHT', async () => {
+      const vendor = await makeVendor('ผู้ขาย journal-simple', '0000000050002');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '500',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '500',
+          paidAt: '2026-05-10',
+        },
+        fakePdf('je-simple.pdf', 'je-simple-1'),
+      );
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      const journal = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'EXPENSE_RECORD', sourceId: accounted.expenseRecord!.id },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(journal.lines).toHaveLength(2);
+      expect(journal.lines[0]!.debit.toString()).toBe('500');
+      expect(journal.lines[1]!.credit.toString()).toBe('500');
     });
   });
 

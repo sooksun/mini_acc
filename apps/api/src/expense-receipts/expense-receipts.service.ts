@@ -20,6 +20,8 @@ import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
 import { sniffMime } from './mime-sniff';
 import { validateExpenseTransition } from './transitions';
+import { JournalService } from '../journal/journal.service';
+import { ACCOUNTS, expenseAccountForCategory } from '../journal/accounts';
 
 type UploadFile = {
   originalname: string;
@@ -42,6 +44,7 @@ export class ExpenseReceiptsService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private journal: JournalService,
   ) {}
 
   async upload(companyId: string, userId: string, dto: UploadExpenseReceiptDto, file?: UploadFile) {
@@ -339,14 +342,15 @@ export class ExpenseReceiptsService {
       });
     }
 
-    // H3: subtotal + VAT − WHT must reconcile with grandTotal (±0.01 baht for
-    // rounding). Without this, ใบเสร็จที่ลงบัญชีอาจมีตัวเลขขัดกัน — ทำลาย invariant
-    // "Report → Journal → Source Document" ใน PRD §7.2.
+    // H3 + P3: subtotal + VAT − WHT must reconcile with grandTotal exactly.
+    // We tighten to zero tolerance because the journal posting below requires
+    // exact Dr = Cr — any rounding noise would prevent a valid journal entry.
+    // Users with off-by-one-baht receipts should reconcile in the source data
+    // (or capture the rounding diff in a separate line) before accounting.
     const expectedGrand = receipt.subtotal
       .plus(receipt.vatAmount)
       .minus(receipt.withholdingTaxAmount);
-    const diff = receipt.grandTotal.minus(expectedGrand).abs();
-    if (diff.gt(new Prisma.Decimal('0.01'))) {
+    if (!receipt.grandTotal.equals(expectedGrand)) {
       throw new UnprocessableEntityException({
         statusCode: 422,
         code: 'AMOUNT_INCONSISTENT',
@@ -357,7 +361,7 @@ export class ExpenseReceiptsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.expenseRecord.create({
+      const record = await tx.expenseRecord.create({
         data: {
           companyId,
           receiptId: receipt.id,
@@ -372,6 +376,54 @@ export class ExpenseReceiptsService {
           grandTotal: receipt.grandTotal,
           recordedBy: userId,
         },
+      });
+
+      // Post the matching journal entry in the same transaction so a journal
+      // failure rolls back the expense record (and vice versa). Standard Thai
+      // SMB expense entry:
+      //   Dr Expense (subtotal — by category)
+      //   Dr Input VAT (vatAmount, if any)
+      //   Cr Cash (grandTotal — what we actually paid out)
+      //   Cr WHT Payable (whtAmount, if any)
+      // Balance: subtotal + vat = grandTotal + wht ← guaranteed by H3.
+      const expenseAccount = expenseAccountForCategory(receipt.category);
+      const lines: Parameters<typeof this.journal.postWithTx>[1]['lines'] = [
+        {
+          accountCode: expenseAccount.code,
+          accountName: expenseAccount.name,
+          debit: receipt.subtotal,
+          partnerId: receipt.vendorId!,
+          description: receipt.documentNumber ?? receipt.originalFileName,
+        },
+      ];
+      if (!receipt.vatAmount.isZero()) {
+        lines.push({
+          accountCode: ACCOUNTS.INPUT_VAT.code,
+          accountName: ACCOUNTS.INPUT_VAT.name,
+          debit: receipt.vatAmount,
+        });
+      }
+      lines.push({
+        accountCode: ACCOUNTS.CASH.code,
+        accountName: ACCOUNTS.CASH.name,
+        credit: receipt.grandTotal,
+        partnerId: receipt.vendorId!,
+      });
+      if (!receipt.withholdingTaxAmount.isZero()) {
+        lines.push({
+          accountCode: ACCOUNTS.WHT_PAYABLE.code,
+          accountName: ACCOUNTS.WHT_PAYABLE.name,
+          credit: receipt.withholdingTaxAmount,
+        });
+      }
+      await this.journal.postWithTx(tx, {
+        companyId,
+        userId,
+        entryDate: expenseDate,
+        description: `รายจ่าย — ${receipt.proposedVendorName ?? 'vendor'} ${receipt.documentNumber ?? ''}`.trim(),
+        sourceType: 'EXPENSE_RECORD',
+        sourceId: record.id,
+        lines,
       });
 
       return tx.expenseReceipt.update({

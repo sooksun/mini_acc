@@ -14,6 +14,8 @@ import { ProductsModule } from './products/products.module';
 import { SalesModule } from './sales/sales.module';
 import { PdfModule } from './pdf/pdf.module';
 import { ExpenseReceiptsModule } from './expense-receipts/expense-receipts.module';
+import { JournalModule } from './journal/journal.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -32,7 +34,9 @@ import { ExpenseReceiptsModule } from './expense-receipts/expense-receipts.modul
     ProductsModule,
     SalesModule,
     PdfModule,
+    JournalModule,
     ExpenseReceiptsModule,
+    PaymentsModule,
   ],
   providers: [
     {
