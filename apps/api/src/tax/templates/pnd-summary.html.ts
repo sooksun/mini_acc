@@ -9,6 +9,7 @@ import {
   thaiBuddhistYear,
   thaiMonthName,
 } from './wht-shared';
+import { getLogoDataUrl } from '../../pdf/pdf-templates/logo';
 
 export interface PndSummaryInput {
   company: Company;
@@ -62,7 +63,8 @@ export function buildPndSummaryHtml(input: PndSummaryInput): string {
 html, body { margin: 0; padding: 0; font-family: 'IBM Plex Sans Thai', 'Sarabun', sans-serif; color: #1a1a1a; font-size: 9.5pt; line-height: 1.3; }
 body { padding: 10mm 12mm; }
 
-.head { display: grid; grid-template-columns: 1fr 240px; gap: 12pt; align-items: start; padding-bottom: 8pt; border-bottom: 2px solid #1F5F8B; }
+.head { display: grid; grid-template-columns: 60pt 1fr 240px; gap: 12pt; align-items: center; padding-bottom: 8pt; border-bottom: 2px solid #1F5F8B; }
+.head .logo { width: 60pt; height: 60pt; object-fit: contain; }
 .head h1 { font-size: 16pt; margin: 0; color: #1F5F8B; }
 .head .sub { color: #555; font-size: 9pt; margin-top: 1pt; }
 .head .subjects { color: #888; font-size: 8.5pt; margin-top: 2pt; }
@@ -108,7 +110,13 @@ table.detail tfoot td.num { text-align: right; font-variant-numeric: tabular-num
 </head>
 <body>
 
-<div class="head">
+${(() => {
+  const logo = getLogoDataUrl();
+  const logoCell = logo
+    ? `<img class="logo" src="${logo}" alt="logo"/>`
+    : '<div></div>';
+  return `<div class="head">
+  ${logoCell}
   <div>
     <h1>ใบแนบ ${meta.code}</h1>
     <div class="sub">${escapeHtml(meta.full)}</div>
@@ -118,7 +126,8 @@ table.detail tfoot td.num { text-align: right; font-variant-numeric: tabular-num
     <div class="label">รอบเดือนภาษี</div>
     <div class="value">${escapeHtml(periodLabel)}</div>
   </div>
-</div>
+</div>`;
+})()}
 
 <div class="party">
   <div class="party-block">

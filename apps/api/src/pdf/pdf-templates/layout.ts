@@ -8,6 +8,7 @@ import {
   numberToThaiBahtText,
 } from './format';
 import { pdfStyles } from './styles';
+import { getLogoDataUrl } from './logo';
 
 // Master Invoice-PP-003-2569.pdf fits 22 placeholder rows in one A4 page using
 // very tight row height (~18pt). Our HTML rows are taller because of web font
@@ -76,7 +77,13 @@ ${input.watermark ? watermarkOverlay(input.watermark) : ''}
 }
 
 function headerSection(company: Company, meta: PdfDocMeta): string {
+  const logo = getLogoDataUrl();
   const initials = company.brandShort ?? 'SN';
+  // ถ้ามีไฟล์ logo.png ใช้รูปจริง; ถ้าไม่มี (env ผิดหรือไฟล์หาย) fallback
+  // ไป initials กล่องเดิม เพื่อไม่ให้ PDF ว่าง.
+  const brandInner = logo
+    ? `<img src="${logo}" alt="logo" class="brand-logo"/>`
+    : `<div>${escapeHtml(initials)}</div>`;
   const tagline = company.tagline ? `<div class="sub">${escapeHtml(company.tagline)}</div>` : '';
   const phone = company.phone ? `โทร. ${escapeHtml(company.phone)}` : '';
   const taxLine = `เลขประจำตัวผู้เสียภาษี ${escapeHtml(formatTaxId(company.taxId))}`;
@@ -91,8 +98,8 @@ function headerSection(company: Company, meta: PdfDocMeta): string {
     .join('');
   return `
 <div class="header">
-  <div class="brand-mark">
-    <div>${escapeHtml(initials)}</div>
+  <div class="brand-mark${logo ? ' brand-mark--logo' : ''}">
+    ${brandInner}
     ${tagline}
   </div>
   <div class="company-block">

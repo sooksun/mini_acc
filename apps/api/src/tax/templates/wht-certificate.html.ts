@@ -9,6 +9,7 @@ import {
   incomeTypeLabel,
   numberToThaiBahtText,
 } from './wht-shared';
+import { getLogoDataUrl } from '../../pdf/pdf-templates/logo';
 
 export type CertCopy = 'ORIGINAL' | 'COPY_1' | 'COPY_2';
 
@@ -64,7 +65,8 @@ html, body { margin: 0; padding: 0; font-family: 'IBM Plex Sans Thai', 'Sarabun'
 .page { page-break-after: always; padding: 12mm 14mm; min-height: 297mm; position: relative; }
 .page:last-child { page-break-after: auto; }
 
-.head { display: grid; grid-template-columns: 1fr 200px; gap: 16px; align-items: start; border-bottom: 1.5px solid #1F5F8B; padding-bottom: 8px; }
+.head { display: grid; grid-template-columns: 60pt 1fr 200px; gap: 14px; align-items: center; border-bottom: 1.5px solid #1F5F8B; padding-bottom: 8px; }
+.head .logo { width: 60pt; height: 60pt; object-fit: contain; }
 .head h1 { font-size: 16pt; margin: 0; color: #1F5F8B; }
 .head .sub { font-size: 9pt; color: #555; margin-top: 2pt; }
 .cert-num { border: 1px solid #888; border-radius: 4pt; padding: 4pt 8pt; font-size: 9pt; text-align: center; }
@@ -127,12 +129,17 @@ function renderCopyPage(input: WhtCertificateInput, copy: CertCopy): string {
 
   const partnerAddress = partner?.address ?? '';
   const companyAddress = company.address ?? '';
+  const logo = getLogoDataUrl();
+  const logoCell = logo
+    ? `<img class="logo" src="${logo}" alt="logo"/>`
+    : '<div></div>';
 
   return `
 <div class="page">
   <div class="copy-badge">${escapeHtml(COPY_LABEL[copy])}</div>
 
   <div class="head">
+    ${logoCell}
     <div>
       <h1>หนังสือรับรองการหักภาษี ณ ที่จ่าย</h1>
       <div class="sub">ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</div>

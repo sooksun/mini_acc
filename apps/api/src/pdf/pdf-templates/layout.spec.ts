@@ -200,7 +200,8 @@ describe('buildPdfHtml', () => {
       // (1) brand mark, (2-6) company info, (7) สำหรับลูกค้า, (8) title box,
       // (9-11) customer/number/date, (12) items table, (13) amount-in-words,
       // (14) summary, (15) notes, (16) signatures
-      expect(html).toContain('class="brand-mark"');
+      // brand-mark class still present whether logo image or text initials are rendered
+      expect(html).toMatch(/class="brand-mark(\s|")/);
       expect(html).toContain('class="company-name-th"');
       expect(html).toContain('class="company-name-en"');
       expect(html).toContain('class="for-customer"');

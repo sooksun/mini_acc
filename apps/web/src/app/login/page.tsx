@@ -38,9 +38,11 @@ export default function LoginPage() {
         className="w-full max-w-sm rounded-xl border border-border bg-surface p-7 shadow-lg"
       >
         <div className="mb-5 flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-[10px] bg-brand-gradient text-base font-bold text-white shadow-md">
-            SN
-          </div>
+          <img
+            src="/logo.png"
+            alt="HJ Account AI"
+            className="h-10 w-10 rounded-[10px] object-contain"
+          />
           <div>
             <div className="text-[15px] font-bold">HJ Account AI</div>
             <div className="text-[11px] text-text-mute">เข้าสู่ระบบ</div>

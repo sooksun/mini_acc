@@ -7,6 +7,8 @@ body { padding: 9mm 11mm 8mm 11mm; position: relative; }
 
 .header { display: grid; grid-template-columns: 90px 1fr 90px; align-items: start; gap: 14px; }
 .brand-mark { width: 80px; height: 80px; border: 1.5px solid ${primaryColor}; border-radius: 4px; display: grid; place-items: center; color: ${primaryColor}; font-weight: 700; font-size: 24pt; letter-spacing: 1.5px; padding: 4px; text-align: center; }
+.brand-mark--logo { border: none; padding: 0; }
+.brand-mark .brand-logo { max-width: 100%; max-height: 100%; object-fit: contain; }
 .brand-mark .sub { font-size: 6.5pt; font-weight: 500; margin-top: 2px; letter-spacing: 0; line-height: 1.1; }
 .company-block { padding-top: 2px; }
 .company-name-th { font-size: 17pt; font-weight: 700; letter-spacing: 0.2px; line-height: 1.1; }

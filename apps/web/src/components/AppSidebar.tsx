@@ -142,9 +142,11 @@ export function AppSidebar({ user }: { user: { fullName: string; initial: string
   return (
     <aside className="sticky top-0 flex h-screen w-[248px] flex-col gap-3 border-r border-border bg-surface/80 px-4 py-5 backdrop-blur-xl">
       <div className="flex items-center gap-3 px-2 pb-3">
-        <div className="grid h-9 w-9 place-items-center rounded-[10px] bg-brand-gradient text-[15px] font-bold text-white shadow-md">
-          SN
-        </div>
+        <img
+          src="/logo.png"
+          alt="HJ Account AI"
+          className="h-9 w-9 rounded-[10px] object-contain"
+        />
         <div>
           <div className="text-[15px] font-bold tracking-tight">HJ Account AI</div>
           <div className="mt-px text-[11px] text-text-mute">หจก. โซลูชั่น เนกซ์เจน</div>
