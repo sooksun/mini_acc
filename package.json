@@ -9,7 +9,7 @@
   "scripts": {
     "build:types": "pnpm --filter @hj/shared-types build",
     "prisma:generate": "pnpm --filter @hj/api run prisma:generate",
-    "predev": "pnpm build:types && pnpm prisma:generate",
+    "predev": "pnpm build:types && (pnpm prisma:generate || echo \"prisma generate skipped — DLL locked by running process\")",
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm build:types && pnpm prisma:generate && pnpm --filter @hj/api build && pnpm --filter @hj/web build",
     "lint": "pnpm -r run lint",
