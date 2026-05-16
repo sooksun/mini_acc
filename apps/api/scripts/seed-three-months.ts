@@ -13,8 +13,13 @@
  */
 import { PrismaClient, Prisma, type DocumentType } from '@prisma/client';
 
-const COMPANY_ID = 'cmp0hkov90000s1o3f9zppm73';
-const OWNER_ID = 'cmp0hkoxk0004s1o3bggftglb';
+// IDs resolved at runtime from prisma seed (Company.taxId + owner email) — see main().
+// kept as mutable module-level singletons so the rest of the script can reference them
+// without threading them through every helper.
+let COMPANY_ID = '';
+let OWNER_ID = '';
+const COMPANY_TAX_ID = '0573567001472';
+const OWNER_EMAIL = 'owner@solutionsnextgen.co.th';
 const SEED_TAG = '[SEED-3M]';
 
 const prisma = new PrismaClient();
@@ -836,12 +841,32 @@ async function seedMonth(
 // ─────────────────────────────────────────────────────────
 
 async function main() {
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_FORCE_PROD !== '1') {
+    throw new Error(
+      'seed-three-months refuses to run with NODE_ENV=production. ' +
+        'If you truly intend to seed demo data into a prod-mode environment, ' +
+        'set SEED_FORCE_PROD=1 explicitly.',
+    );
+  }
   console.log('Seeding 3 months (ก.พ.–เม.ย. 2569)...');
 
-  const company = await prisma.company.findUnique({ where: { id: COMPANY_ID } });
-  if (!company) throw new Error(`Company ${COMPANY_ID} not found — run prisma seed first`);
-  const owner = await prisma.user.findUnique({ where: { id: OWNER_ID } });
-  if (!owner) throw new Error(`Owner user ${OWNER_ID} not found`);
+  const company = await prisma.company.findFirst({ where: { taxId: COMPANY_TAX_ID } });
+  if (!company) {
+    throw new Error(
+      `Company with taxId ${COMPANY_TAX_ID} not found — run \`pnpm --filter @hj/api exec prisma db seed\` first`,
+    );
+  }
+  const owner = await prisma.user.findFirst({
+    where: { email: OWNER_EMAIL, companyId: company.id },
+  });
+  if (!owner) {
+    throw new Error(
+      `Owner user ${OWNER_EMAIL} not found in company ${company.id} — run prisma seed first`,
+    );
+  }
+  COMPANY_ID = company.id;
+  OWNER_ID = owner.id;
+  console.log(`resolved company=${COMPANY_ID} owner=${OWNER_ID}`);
 
   await cleanupPrevious();
 
