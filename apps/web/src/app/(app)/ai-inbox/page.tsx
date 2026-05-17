@@ -59,6 +59,35 @@ interface DuplicateInfo {
   attemptedFileName: string;
 }
 
+// Mirror server-side validation (apps/api/src/ai/dto/accept-suggestion.dto.ts)
+// so the operator sees errors before they hit submit, not as a toast after.
+const TAX_ID_RE = /^\d{13}$/;
+const MONEY_RE = /^-?\d+(\.\d{1,2})?$/;
+
+type FormErrors = Partial<Record<keyof ExtractedPayload, string>>;
+
+function validateForm(form: ExtractedPayload): FormErrors {
+  const errors: FormErrors = {};
+  const taxId = form.vendorTaxId?.replace(/[\s-]/g, '').trim();
+  if (taxId && !TAX_ID_RE.test(taxId)) {
+    errors.vendorTaxId =
+      'ต้องเป็นเลขผู้เสียภาษีไทย 13 หลัก (เว้นว่างได้สำหรับผู้ขายต่างประเทศ)';
+  }
+  const moneyFields: Array<keyof ExtractedPayload> = [
+    'subtotal',
+    'vatAmount',
+    'withholdingTaxAmount',
+    'grandTotal',
+  ];
+  for (const f of moneyFields) {
+    const v = (form[f] as string | undefined)?.replace(/,/g, '').trim();
+    if (v && !MONEY_RE.test(v)) {
+      errors[f] = 'ต้องเป็นจำนวนเงิน เช่น 1234.56';
+    }
+  }
+  return errors;
+}
+
 export default function AiInboxPage() {
   const toast = useToast();
   const [rows, setRows] = useState<SuggestionRow[]>([]);
@@ -411,6 +440,9 @@ function ReviewModal({
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = useState<'review' | 'reject'>('review');
 
+  const errors = validateForm(form);
+  const hasErrors = Object.keys(errors).length > 0;
+
   useEffect(() => {
     if (suggestion) {
       setForm({
@@ -507,8 +539,9 @@ function ReviewModal({
             <button
               type="submit"
               form="ai-accept-form"
-              disabled={saving}
-              className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+              disabled={saving || hasErrors}
+              title={hasErrors ? 'กรุณาแก้ไขฟิลด์ที่ขีดแดงก่อน' : undefined}
+              className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? 'กำลังบันทึก…' : 'รับและสร้างใบเสร็จ'}
             </button>
@@ -574,13 +607,27 @@ function ReviewModal({
               label="เลขผู้เสียภาษีผู้ขาย"
               confidence={suggestion.confidence ?? undefined}
               value={
-                <input
-                  value={form.vendorTaxId ?? ''}
-                  onChange={(e) => setForm((v) => ({ ...v, vendorTaxId: e.target.value }))}
-                  className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 font-mono text-[13.5px] outline-none focus:border-brand"
-                />
+                <div className="flex gap-1">
+                  <input
+                    value={form.vendorTaxId ?? ''}
+                    onChange={(e) => setForm((v) => ({ ...v, vendorTaxId: e.target.value }))}
+                    placeholder="13 หลัก หรือเว้นว่าง"
+                    className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 font-mono text-[13.5px] outline-none focus:border-brand"
+                  />
+                  {form.vendorTaxId && (
+                    <button
+                      type="button"
+                      onClick={() => setForm((v) => ({ ...v, vendorTaxId: '' }))}
+                      title="เคลียร์ฟิลด์ (เช่น ผู้ขายต่างประเทศ)"
+                      className="rounded-md border border-border bg-surface px-2 text-[12px] text-text-mute hover:bg-surface-3"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               }
               rawText={suggestion.payload.vendorTaxId}
+              error={errors.vendorTaxId}
             />
             <AiExtractedField
               label="เลขที่เอกสาร"
@@ -638,6 +685,7 @@ function ReviewModal({
                   className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-right font-mono text-[14px] outline-none focus:border-brand"
                 />
               }
+              error={errors.subtotal}
             />
             <AiExtractedField
               label="VAT"
@@ -649,6 +697,7 @@ function ReviewModal({
                   className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-right font-mono text-[14px] outline-none focus:border-brand"
                 />
               }
+              error={errors.vatAmount}
             />
             <AiExtractedField
               label="หัก ณ ที่จ่าย"
@@ -662,6 +711,7 @@ function ReviewModal({
                   className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-right font-mono text-[14px] outline-none focus:border-brand"
                 />
               }
+              error={errors.withholdingTaxAmount}
             />
             <AiExtractedField
               label="ยอดสุทธิ"
@@ -673,8 +723,15 @@ function ReviewModal({
                   className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-right font-mono text-[14px] outline-none focus:border-brand"
                 />
               }
+              error={errors.grandTotal}
             />
           </form>
+
+          {hasErrors && (
+            <div className="rounded-md border border-bad/40 bg-bad/5 p-3 text-[12.5px] text-bad">
+              พบ {Object.keys(errors).length} ฟิลด์ที่ยังไม่ถูกต้อง — แก้ไขก่อนกด "รับและสร้างใบเสร็จ"
+            </div>
+          )}
         </div>
       )}
 

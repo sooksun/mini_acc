@@ -14,6 +14,8 @@ export interface AiExtractedFieldProps {
   onReject?: () => void;
   /** Custom edit handler — typically opens a modal pre-filled with `value`. */
   onEdit?: () => void;
+  /** Inline validation error to display below the field (red helper text). */
+  error?: string;
 }
 
 /**
@@ -31,10 +33,13 @@ export function AiExtractedField({
   onAccept,
   onReject,
   onEdit,
+  error,
 }: AiExtractedFieldProps) {
   const tier = confidence != null ? getConfidenceTier(confidence) : undefined;
-  const borderCls =
-    tier === 'low'
+  // Inline validation error wins over confidence tier — invalid is invalid.
+  const borderCls = error
+    ? 'border-bad'
+    : tier === 'low'
       ? 'border-bad/50'
       : tier === 'medium'
         ? 'border-warn/40'
@@ -50,6 +55,7 @@ export function AiExtractedField({
       {rawText && rawText !== String(value) && (
         <div className="mt-1 text-[11.5px] text-text-mute">ต้นฉบับ: {rawText}</div>
       )}
+      {error && <div className="mt-1 text-[11.5px] text-bad">{error}</div>}
       {(onAccept || onReject || onEdit) && (
         <div className="mt-2 flex gap-2 text-[11.5px]">
           {onAccept && (
