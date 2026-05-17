@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Readable } from 'node:stream';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import type { ProductType } from '@hj/shared-types';
@@ -215,10 +221,24 @@ export class ProductsService {
    */
   async importFromExcel(companyId: string, fileBuffer: Buffer): Promise<ImportResult> {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(fileBuffer as unknown as ArrayBuffer);
+    // ExcelJS v4.4 `wb.xlsx.load(buffer)` has a known edge case where it
+    // throws "Cannot read properties of undefined (reading 'sheets')" — the
+    // stream-based read path is stable.
+    try {
+      const stream = Readable.from(fileBuffer);
+      await wb.xlsx.read(stream);
+    } catch (err) {
+      throw new UnprocessableEntityException({
+        code: 'INVALID_XLSX',
+        message: `อ่านไฟล์ Excel ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
     const ws = wb.getWorksheet('Products') ?? wb.worksheets[0];
     if (!ws) {
-      return { totalRows: 0, created: 0, skipped: 0, errors: 0, details: [] };
+      throw new UnprocessableEntityException({
+        code: 'NO_SHEET',
+        message: 'ไฟล์ไม่มี sheet "Products" — กรุณาใช้ template ที่ดาวน์โหลดจากระบบ',
+      });
     }
 
     const details: ImportRowResult[] = [];
