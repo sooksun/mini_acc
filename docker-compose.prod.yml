@@ -70,7 +70,11 @@ services:
       # (e.g. an external MariaDB) by the name `host.docker.internal`.
       - "host.docker.internal:host-gateway"
     volumes:
-      - attachments:/var/lib/hj-account/attachments
+      # Bind mount (not named volume) so attachments stay on host disk where
+      # backups can see them and permissions are explicit. First-time setup:
+      #   mkdir -p ./attachments && sudo chown -R 1001:0 ./attachments
+      # (api container runs as uid 1001 / group 0 — see Dockerfile.api)
+      - ./attachments:/var/lib/hj-account/attachments
       # Logo for sales-document PDFs. apps/web/public/logo.png is the same
       # file the web app serves; mount it read-only into the api container
       # so PdfTemplateService can base64-inline it.
@@ -132,4 +136,3 @@ networks:
 
 volumes:
   redis_data:
-  attachments:

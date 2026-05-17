@@ -72,6 +72,17 @@ cd /DATA/AppData/www/mini_acc
 
 > Compose project name is derived from the directory (`mini_acc`), so volumes are prefixed `mini_acc_*` (e.g. `mini_acc_db_data`). Don't rename the directory after first deploy or the volumes will look orphaned.
 
+### Attachment storage (uploads — expense receipts + AI inbox)
+
+`./attachments` is a bind mount into the api container at `/var/lib/hj-account/attachments`. Create it once with the right owner before first `up -d`:
+
+```bash
+mkdir -p ./attachments
+sudo chown -R 1001:0 ./attachments    # api container runs as uid 1001
+```
+
+If you skip this and the api starts first, Docker creates the directory as `root:root` and uploads fail with `EACCES: permission denied`. Fix after the fact with the same `chown` command.
+
 ---
 
 ## 2. Clone the repo
