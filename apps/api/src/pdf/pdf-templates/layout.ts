@@ -84,7 +84,8 @@ function headerSection(company: Company, meta: PdfDocMeta): string {
   const brandInner = logo
     ? `<img src="${logo}" alt="logo" class="brand-logo"/>`
     : `<div>${escapeHtml(initials)}</div>`;
-  const tagline = company.tagline ? `<div class="sub">${escapeHtml(company.tagline)}</div>` : '';
+  // tagline (company.tagline) ถูกลบออกจาก PDF — ค่ายังเก็บใน DB
+  // เผื่อใช้ที่อื่น (web header, etc.)
   const phone = company.phone ? `โทร. ${escapeHtml(company.phone)}` : '';
   const taxLine = `เลขประจำตัวผู้เสียภาษี ${escapeHtml(formatTaxId(company.taxId))}`;
   // Master PDF puts Thai + English address on separate lines. Author input may
@@ -100,7 +101,6 @@ function headerSection(company: Company, meta: PdfDocMeta): string {
 <div class="header">
   <div class="brand-mark${logo ? ' brand-mark--logo' : ''}">
     ${brandInner}
-    ${tagline}
   </div>
   <div class="company-block">
     <div class="company-name-th">${escapeHtml(company.nameTh)}</div>
