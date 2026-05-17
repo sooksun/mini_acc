@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { ProductType } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { Spinner } from '@/components/ui/Spinner';
 import { Empty } from '@/components/ui/Empty';
+import { Modal } from '@/components/ui/Modal';
 import { ProductTypeBadge } from '@/components/ui/ProductTypeBadge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Money } from '@/components/ui/Money';
 import { useToast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
+import { api, apiBlob } from '@/lib/api';
 import { getUser } from '@/lib/auth';
 import { ProductForm } from '@/features/products/ProductForm';
 
@@ -35,6 +36,7 @@ export default function ProductsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deactivateId, setDeactivateId] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const role = getUser()?.role;
   const canEdit = role === 'OWNER' || role === 'ADMIN';
@@ -86,15 +88,43 @@ export default function ProductsPage() {
             <p className="mt-1 text-[13px] text-text-mute">รายการที่ใช้กรอกในเอกสารขายและรายจ่าย</p>
           </div>
           {canEdit && (
-            <button
-              onClick={() => {
-                setEditingId(null);
-                setFormOpen(true);
-              }}
-              className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
-            >
-              + เพิ่มรายการใหม่
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const blob = await apiBlob('/products/import/template');
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'products-import-template.xlsx';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+                  } catch (e: any) {
+                    toast.error('ดาวน์โหลด template ไม่สำเร็จ: ' + e.message);
+                  }
+                }}
+                className="rounded-md border border-border bg-surface px-3.5 py-2 text-[13px] text-text-soft hover:bg-surface-3"
+              >
+                ดาวน์โหลด Template
+              </button>
+              <button
+                onClick={() => setImportOpen(true)}
+                className="rounded-md border border-brand/40 bg-brand/5 px-3.5 py-2 text-[13px] font-medium text-brand hover:bg-brand/10"
+              >
+                นำเข้า Excel
+              </button>
+              <button
+                onClick={() => {
+                  setEditingId(null);
+                  setFormOpen(true);
+                }}
+                className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+              >
+                + เพิ่มรายการใหม่
+              </button>
+            </div>
           )}
         </div>
 
@@ -220,6 +250,235 @@ export default function ProductsPage() {
           if (deactivateId) return handleDeactivate(deactivateId);
         }}
       />
+
+      <ImportProductsModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => {
+          setImportOpen(false);
+          load();
+        }}
+      />
     </>
+  );
+}
+
+interface ImportRowResult {
+  row: number;
+  status: 'created' | 'skipped' | 'error';
+  code?: string;
+  nameTh?: string;
+  message?: string;
+}
+
+interface ImportResult {
+  totalRows: number;
+  created: number;
+  skipped: number;
+  errors: number;
+  details: ImportRowResult[];
+}
+
+function ImportProductsModal({
+  open,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setFile(null);
+      setResult(null);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }, [open]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!file) {
+      toast.error('กรุณาเลือกไฟล์ .xlsx');
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api<ImportResult>('/products/import', {
+        method: 'POST',
+        body: fd,
+      });
+      setResult(res);
+      if (res.errors === 0) {
+        toast.success(`นำเข้าสำเร็จ ${res.created} รายการ`);
+      } else {
+        toast.info(`สร้าง ${res.created} / ผิดพลาด ${res.errors} แถว — ตรวจรายการด้านล่าง`);
+      }
+    } catch (e: any) {
+      toast.error('นำเข้าไม่สำเร็จ: ' + e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function close() {
+    if (result && result.created > 0) onDone();
+    else onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title="นำเข้าสินค้า/บริการจาก Excel"
+      size="lg"
+      footer={
+        result ? (
+          <button
+            type="button"
+            onClick={close}
+            className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+          >
+            เสร็จสิ้น
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border px-4 py-2 text-[13px]"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="submit"
+              form="import-products-form"
+              disabled={uploading || !file}
+              className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md disabled:opacity-60"
+            >
+              {uploading ? 'กำลังนำเข้า…' : 'นำเข้า'}
+            </button>
+          </>
+        )
+      }
+    >
+      {!result && (
+        <form id="import-products-form" onSubmit={submit} className="space-y-4">
+          <div className="rounded-md border border-brand/20 bg-brand/5 p-3 text-[12.5px] text-text-soft">
+            <div className="mb-1 font-medium text-text">รูปแบบไฟล์</div>
+            ใช้ template ที่ดาวน์โหลดจากปุ่ม &quot;ดาวน์โหลด Template&quot; — Sheet ชื่อ &quot;Products&quot;,
+            แถวที่ 1 เป็น header, แถวข้อมูลเริ่มที่ 2.
+            <div className="mt-1">
+              คอลัมน์บังคับ: <code>type</code>, <code>nameTh</code>, <code>unit</code>,{' '}
+              <code>unitPrice</code>. type ที่อนุญาต:{' '}
+              <code>SERVICE / GOOD / MATERIAL / ASSET</code>.
+            </div>
+          </div>
+
+          <label className="block">
+            <span className="mb-1 block text-[12.5px] text-text-soft">เลือกไฟล์ Excel (.xlsx)</span>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-[13px] file:mr-3 file:rounded-md file:border-0 file:bg-surface-3 file:px-3 file:py-1.5 file:text-[12.5px] file:font-medium file:text-text-soft hover:file:bg-surface-2"
+            />
+            {file && (
+              <div className="mt-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-[12.5px]">
+                <span className="font-medium">{file.name}</span>
+                <span className="ml-2 text-text-mute">
+                  ({(file.size / 1024).toFixed(1)} KB)
+                </span>
+              </div>
+            )}
+          </label>
+        </form>
+      )}
+
+      {result && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <Stat label="ทั้งหมด" value={result.totalRows} />
+            <Stat label="สร้าง" value={result.created} tone="ok" />
+            <Stat label="ข้าม" value={result.skipped} tone="mute" />
+            <Stat label="ผิดพลาด" value={result.errors} tone={result.errors ? 'bad' : 'mute'} />
+          </div>
+          <div className="max-h-72 overflow-y-auto rounded-md border border-border">
+            <table className="w-full text-[12.5px]">
+              <thead className="sticky top-0 bg-surface-2 text-left text-text-soft">
+                <tr>
+                  <th className="px-3 py-2 font-medium">แถว</th>
+                  <th className="px-3 py-2 font-medium">สถานะ</th>
+                  <th className="px-3 py-2 font-medium">รหัส</th>
+                  <th className="px-3 py-2 font-medium">ชื่อ</th>
+                  <th className="px-3 py-2 font-medium">รายละเอียด</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.details.map((d) => (
+                  <tr key={d.row} className="border-t border-border align-top">
+                    <td className="px-3 py-2 font-mono">{d.row}</td>
+                    <td className="px-3 py-2">
+                      <StatusPill status={d.status} />
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[11.5px]">{d.code ?? '—'}</td>
+                    <td className="px-3 py-2">{d.nameTh ?? '—'}</td>
+                    <td className="px-3 py-2 text-text-soft">{d.message ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function Stat({ label, value, tone }: { label: string; value: number; tone?: 'ok' | 'bad' | 'mute' }) {
+  const toneCls =
+    tone === 'ok'
+      ? 'text-ok'
+      : tone === 'bad'
+        ? 'text-bad'
+        : tone === 'mute'
+          ? 'text-text-mute'
+          : 'text-text';
+  return (
+    <div className="rounded-md border border-border bg-surface-2 px-3 py-2">
+      <div className={`text-xl font-semibold ${toneCls}`}>{value}</div>
+      <div className="text-[11.5px] text-text-mute">{label}</div>
+    </div>
+  );
+}
+
+function StatusPill({ status }: { status: 'created' | 'skipped' | 'error' }) {
+  if (status === 'created') {
+    return (
+      <span className="inline-flex rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
+        สร้างแล้ว
+      </span>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <span className="inline-flex rounded-full border border-bad/40 bg-bad/10 px-2 py-0.5 text-[11px] text-bad">
+        ผิดพลาด
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex rounded-full border border-text-mute/40 bg-surface-3 px-2 py-0.5 text-[11px] text-text-mute">
+      ข้าม
+    </span>
   );
 }
