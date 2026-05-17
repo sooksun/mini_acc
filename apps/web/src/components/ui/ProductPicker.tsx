@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import type { ProductType } from '@hj/shared-types';
 import { api } from '@/lib/api';
+import { getUser } from '@/lib/auth';
+import { Modal } from './Modal';
 import { Spinner } from './Spinner';
+import { useToast } from './Toast';
 
 interface Product {
   id: string;
@@ -29,6 +32,10 @@ export function ProductPicker({
   const [search, setSearch] = useState('');
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const role = getUser()?.role;
+  const canCreate = role === 'OWNER' || role === 'ADMIN';
 
   useEffect(() => {
     if (!open) return;
@@ -49,6 +56,13 @@ export function ProductPicker({
     }, 200);
     return () => clearTimeout(t);
   }, [open, search]);
+
+  function handleCreated(p: Product) {
+    onChange(p);
+    setCreateOpen(false);
+    setOpen(false);
+    setSearch('');
+  }
 
   return (
     <div className="relative">
@@ -110,10 +124,226 @@ export function ProductPicker({
                 {p.code && <div className="text-[11px] text-text-mute">{p.code}</div>}
               </button>
             ))}
+          {canCreate && (
+            <div className="sticky bottom-0 border-t border-border bg-surface p-2">
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="block w-full rounded-md border border-brand/40 bg-brand/5 px-3 py-2 text-left text-[12.5px] font-medium text-brand hover:bg-brand/10"
+              >
+                + เพิ่มสินค้า/บริการใหม่
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {open && <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} aria-hidden />}
+
+      <CreateProductModal
+        open={createOpen}
+        defaultName={search}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+      />
     </div>
+  );
+}
+
+interface CreateForm {
+  type: ProductType;
+  code: string;
+  nameTh: string;
+  unit: string;
+  unitPrice: string;
+  vatable: boolean;
+}
+
+function CreateProductModal({
+  open,
+  defaultName,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  defaultName?: string;
+  onClose: () => void;
+  onCreated: (p: Product) => void;
+}) {
+  const toast = useToast();
+  const [form, setForm] = useState<CreateForm>({
+    type: 'SERVICE',
+    code: '',
+    nameTh: '',
+    unit: 'รายการ',
+    unitPrice: '0',
+    vatable: true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset form when modal opens; seed nameTh from the picker's search box if any.
+  useEffect(() => {
+    if (!open) return;
+    setForm({
+      type: 'SERVICE',
+      code: '',
+      nameTh: defaultName?.trim() ?? '',
+      unit: 'รายการ',
+      unitPrice: '0',
+      vatable: true,
+    });
+    setError(null);
+  }, [open, defaultName]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const name = form.nameTh.trim();
+    const unit = form.unit.trim();
+    const price = Number(form.unitPrice);
+    if (!name) {
+      setError('กรุณากรอกชื่อสินค้า/บริการ');
+      return;
+    }
+    if (!unit) {
+      setError('กรุณากรอกหน่วย');
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      setError('ราคาต้องเป็นตัวเลข ≥ 0');
+      return;
+    }
+    setSaving(true);
+    try {
+      const created = await api<Product>('/products', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: form.type,
+          code: form.code.trim() || undefined,
+          nameTh: name,
+          unit,
+          unitPrice: price,
+          vatable: form.vatable,
+        }),
+      });
+      toast.success(`เพิ่ม "${created.nameTh}" แล้ว`);
+      onCreated(created);
+    } catch (err: any) {
+      setError(err.message ?? 'บันทึกไม่สำเร็จ');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls =
+    'w-full rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[13.5px] outline-none focus:border-brand';
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="เพิ่มสินค้า/บริการ"
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-border px-4 py-2 text-[13px]"
+          >
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            form="create-product-form"
+            disabled={saving}
+            className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md disabled:opacity-60"
+          >
+            {saving ? 'กำลังบันทึก…' : 'บันทึก + ใช้รายการนี้'}
+          </button>
+        </>
+      }
+    >
+      <form id="create-product-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
+        {error && (
+          <div className="md:col-span-2 rounded-md border border-bad/40 bg-bad/5 px-3 py-2 text-[12.5px] text-bad">
+            {error}
+          </div>
+        )}
+
+        <label>
+          <span className="mb-1 block text-[12px] text-text-soft">ประเภท</span>
+          <select
+            value={form.type}
+            onChange={(e) => setForm((v) => ({ ...v, type: e.target.value as ProductType }))}
+            className={inputCls}
+          >
+            <option value="SERVICE">บริการ</option>
+            <option value="GOOD">สินค้า</option>
+            <option value="MATERIAL">วัสดุ</option>
+          </select>
+        </label>
+        <label>
+          <span className="mb-1 block text-[12px] text-text-soft">รหัส (optional)</span>
+          <input
+            value={form.code}
+            onChange={(e) => setForm((v) => ({ ...v, code: e.target.value }))}
+            placeholder="SVC-002"
+            maxLength={32}
+            className={`${inputCls} font-mono`}
+          />
+        </label>
+
+        <label className="md:col-span-2">
+          <span className="mb-1 block text-[12px] text-text-soft">
+            ชื่อ <span className="text-bad">*</span>
+          </span>
+          <input
+            value={form.nameTh}
+            onChange={(e) => setForm((v) => ({ ...v, nameTh: e.target.value }))}
+            required
+            maxLength={200}
+            autoFocus
+            className={inputCls}
+          />
+        </label>
+
+        <label>
+          <span className="mb-1 block text-[12px] text-text-soft">
+            หน่วย <span className="text-bad">*</span>
+          </span>
+          <input
+            value={form.unit}
+            onChange={(e) => setForm((v) => ({ ...v, unit: e.target.value }))}
+            required
+            maxLength={32}
+            className={inputCls}
+          />
+        </label>
+        <label>
+          <span className="mb-1 block text-[12px] text-text-soft">
+            ราคา/หน่วย (บาท) <span className="text-bad">*</span>
+          </span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.unitPrice}
+            onChange={(e) => setForm((v) => ({ ...v, unitPrice: e.target.value }))}
+            required
+            className={`${inputCls} text-right font-mono`}
+          />
+        </label>
+
+        <label className="md:col-span-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={form.vatable}
+            onChange={(e) => setForm((v) => ({ ...v, vatable: e.target.checked }))}
+          />
+          <span className="text-[13px]">มี VAT (ราคาที่กรอกยังไม่รวม VAT)</span>
+        </label>
+      </form>
+    </Modal>
   );
 }
