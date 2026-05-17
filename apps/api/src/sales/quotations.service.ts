@@ -12,6 +12,10 @@ export class QuotationsService {
     return this.salesDoc.create('QUOTATION', companyId, userId, dto);
   }
 
+  update(companyId: string, id: string, dto: CreateSalesDocumentDto) {
+    return this.salesDoc.update('QUOTATION', companyId, id, dto);
+  }
+
   confirm(companyId: string, userId: string, role: Role, id: string) {
     return this.salesDoc.confirm('QUOTATION', companyId, userId, role, id);
   }

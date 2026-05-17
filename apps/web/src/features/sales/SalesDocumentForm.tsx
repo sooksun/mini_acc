@@ -38,18 +38,79 @@ interface CompanySnapshot {
   vatEffectiveDate: string | null;
 }
 
-export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
+export interface SalesDocumentInitial {
+  id: string;
+  customer: {
+    id: string;
+    nameTh: string;
+    address: string | null;
+    taxId: string | null;
+    branch: string | null;
+  };
+  documentDate: string;
+  dueDate: string | null;
+  reference: string | null;
+  note: string | null;
+  vatRate: string;
+  whtRate: string;
+  items: Array<{
+    productId: string | null;
+    productCode: string | null;
+    description: string;
+    unit: string;
+    quantity: string;
+    unitPrice: string;
+    discount: string;
+    vatable: boolean;
+  }>;
+}
+
+export function SalesDocumentForm({
+  meta,
+  initial,
+}: {
+  meta: DocTypeMeta;
+  initial?: SalesDocumentInitial;
+}) {
   const router = useRouter();
   const toast = useToast();
+  const mode: 'create' | 'edit' = initial ? 'edit' : 'create';
 
-  const [customer, setCustomer] = useState<any>(null);
-  const [documentDate, setDocumentDate] = useState(new Date().toISOString().slice(0, 10));
-  const [dueDate, setDueDate] = useState('');
-  const [reference, setReference] = useState('');
-  const [note, setNote] = useState('');
-  const [vatRate, setVatRate] = useState(7);
-  const [whtRate, setWhtRate] = useState(0);
-  const [items, setItems] = useState<ItemRow[]>([emptyRow()]);
+  const [customer, setCustomer] = useState<any>(
+    initial
+      ? {
+          id: initial.customer.id,
+          nameTh: initial.customer.nameTh,
+          address: initial.customer.address,
+          taxId: initial.customer.taxId,
+          branch: initial.customer.branch,
+        }
+      : null,
+  );
+  const [documentDate, setDocumentDate] = useState(
+    initial
+      ? initial.documentDate.slice(0, 10)
+      : new Date().toISOString().slice(0, 10),
+  );
+  const [dueDate, setDueDate] = useState(initial?.dueDate?.slice(0, 10) ?? '');
+  const [reference, setReference] = useState(initial?.reference ?? '');
+  const [note, setNote] = useState(initial?.note ?? '');
+  const [vatRate, setVatRate] = useState(initial ? Number(initial.vatRate) : 7);
+  const [whtRate, setWhtRate] = useState(initial ? Number(initial.whtRate) : 0);
+  const [items, setItems] = useState<ItemRow[]>(
+    initial
+      ? initial.items.map((it) => ({
+          productId: it.productId ?? undefined,
+          productCode: it.productCode ?? undefined,
+          description: it.description,
+          unit: it.unit,
+          quantity: Number(it.quantity),
+          unitPrice: Number(it.unitPrice),
+          discount: Number(it.discount),
+          vatable: it.vatable,
+        }))
+      : [emptyRow()],
+  );
   const [previewNumber, setPreviewNumber] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +125,9 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
 
   useEffect(() => {
     if (!documentDate) return;
+    // In edit mode the document already has a placeholder DRAFT- number; the
+    // preview is only meaningful before first confirm. Skip the peek call.
+    if (mode === 'edit') return;
     api<{ number: string }>('/numbering/peek', {
       method: 'POST',
       body: JSON.stringify({
@@ -73,7 +137,7 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
     })
       .then((r) => setPreviewNumber(r.number))
       .catch(() => setPreviewNumber(null));
-  }, [documentDate, meta.type]);
+  }, [documentDate, meta.type, mode]);
 
   const totals = useMemo(() => computeTotals(items, vatRate, whtRate), [items, vatRate, whtRate]);
 
@@ -149,12 +213,21 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
             vatable: it.vatable,
           })),
       };
-      const created = await api<{ id: string }>(meta.apiBase, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      toast.success(`สร้าง${meta.shortTitle}แล้ว (DRAFT)`);
-      router.push(`${meta.listHref}/${created.id}` as any);
+      if (mode === 'edit' && initial) {
+        await api(`${meta.apiBase}/${initial.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        toast.success(`บันทึกการแก้ไข${meta.shortTitle}แล้ว`);
+        router.push(`${meta.listHref}/${initial.id}` as any);
+      } else {
+        const created = await api<{ id: string }>(meta.apiBase, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        toast.success(`สร้าง${meta.shortTitle}แล้ว (DRAFT)`);
+        router.push(`${meta.listHref}/${created.id}` as any);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -162,21 +235,33 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
     }
   }
 
+  const titlePrefix = mode === 'edit' ? 'แก้ไข' : 'สร้าง';
+  const cancelHref =
+    mode === 'edit' && initial ? `${meta.listHref}/${initial.id}` : meta.listHref;
+  const submitLabel = mode === 'edit' ? 'บันทึกการแก้ไข' : 'บันทึกเป็น DRAFT';
+
   return (
     <>
-      <AppTopbar title={'สร้าง' + meta.shortTitle} />
+      <AppTopbar title={titlePrefix + meta.shortTitle} />
       <form onSubmit={onSubmit} className="flex-1 px-7 pb-16 pt-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">สร้าง{meta.title}</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {titlePrefix}
+              {meta.title}
+            </h1>
             <p className="mt-1 text-[13px] text-text-mute">
-              เลขที่ตัวอย่างเมื่อยืนยัน:{' '}
-              <span className="font-mono font-medium text-text">{previewNumber ?? '—'}</span>
+              {mode === 'edit'
+                ? 'แก้ได้เฉพาะเอกสารฉบับร่าง — เมื่อยืนยันออกเลขจริงแล้วจะแก้ไม่ได้'
+                : 'เลขที่ตัวอย่างเมื่อยืนยัน: '}
+              {mode === 'create' && (
+                <span className="font-mono font-medium text-text">{previewNumber ?? '—'}</span>
+              )}
             </p>
           </div>
           <div className="flex gap-2">
             <Link
-              href={meta.listHref as any}
+              href={cancelHref as any}
               className="rounded-md border border-border bg-surface px-3.5 py-2 text-[13px] text-text-soft hover:bg-surface-3"
             >
               ยกเลิก
@@ -186,7 +271,7 @@ export function SalesDocumentForm({ meta }: { meta: DocTypeMeta }) {
               disabled={submitting}
               className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md disabled:opacity-50"
             >
-              {submitting ? 'กำลังบันทึก…' : 'บันทึกเป็น DRAFT'}
+              {submitting ? 'กำลังบันทึก…' : submitLabel}
             </button>
           </div>
         </div>

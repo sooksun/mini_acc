@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -47,6 +48,26 @@ export class QuotationsController {
   })
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateSalesDocumentDto) {
     return this.quotations.create(user.companyId, user.id, dto);
+  }
+
+  @Patch(':id')
+  @Roles('OWNER', 'ADMIN')
+  @AuditAction('UPDATE_DOCUMENT', {
+    entityType: 'SalesDocument:QUOTATION',
+    getEntityId: (req) => req.params['id'] as string,
+    getMetadata: (req, res) => ({
+      type: 'QUOTATION',
+      number: res?.number,
+      itemCount: req.body?.items?.length,
+      grandTotal: res?.grandTotal,
+    }),
+  })
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CreateSalesDocumentDto,
+  ) {
+    return this.quotations.update(user.companyId, id, dto);
   }
 
   @Post(':id/confirm')

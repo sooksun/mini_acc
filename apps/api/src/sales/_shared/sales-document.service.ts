@@ -102,6 +102,103 @@ export class SalesDocumentService {
     return this.toDto(created);
   }
 
+  /**
+   * Update a DRAFT sales document. Only `DRAFT` status is editable — once
+   * confirmed (USER_CONFIRMED+), the document is locked and corrections must
+   * happen via void + new document. OWNER/ADMIN authorisation is enforced at
+   * the controller level via @Roles.
+   *
+   * Replaces all items + recomputes totals. Re-resolves the customer snapshot
+   * if the customerId changed. preValidate (e.g. VAT-eligibility for
+   * TAX_INVOICE) is invoked the same way as create().
+   */
+  async update(
+    type: DocumentType,
+    companyId: string,
+    id: string,
+    input: CreateSalesDocumentInput,
+    preValidate?: PreCreateHook,
+  ) {
+    const existing = await this.prisma.salesDocument.findFirst({
+      where: { id, companyId, type },
+      select: { id: true, status: true },
+    });
+    if (!existing) throw new NotFoundException('Document not found');
+    if (existing.status !== 'DRAFT') {
+      throw new UnprocessableEntityException({
+        code: 'ONLY_DRAFT_EDITABLE',
+        message: `แก้ไขเอกสารได้เฉพาะสถานะ DRAFT — ปัจจุบัน ${existing.status}. กรุณายกเลิกแล้วสร้างใบใหม่`,
+        status: existing.status,
+      });
+    }
+
+    const customer = await this.prisma.partner.findFirst({
+      where: {
+        id: input.customerId,
+        companyId,
+        OR: [{ type: 'CUSTOMER' }, { type: 'BOTH' }],
+      },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found or not a customer');
+    }
+
+    if (preValidate) await preValidate(companyId, customer, input);
+
+    await this.validateProducts(companyId, input.items);
+
+    const totals = computeTotals(input.items, input.vatRate ?? 7, input.whtRate ?? 0);
+    const documentDate = new Date(input.documentDate);
+    const beYear = getBuddhistYear(documentDate);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Replace all items — simpler + safer than diffing, and DRAFTs aren't
+      // referenced from journals or VAT records yet so cascading is fine.
+      await tx.salesDocumentItem.deleteMany({ where: { salesDocumentId: id } });
+
+      return tx.salesDocument.update({
+        where: { id },
+        data: {
+          customerId: customer.id,
+          documentDate,
+          beYear,
+          dueDate: input.dueDate ? new Date(input.dueDate) : null,
+          reference: input.reference ?? null,
+          note: input.note ?? null,
+          customerSnapshotName: customer.nameTh,
+          customerSnapshotAddress: customer.address,
+          customerSnapshotTaxId: customer.taxId,
+          customerSnapshotBranch: customer.branch,
+          subtotal: totals.subtotal,
+          vatRate: totals.vatRate,
+          vatAmount: totals.vatAmount,
+          totalAfterVat: totals.totalAfterVat,
+          whtRate: totals.whtRate,
+          whtAmount: totals.whtAmount,
+          grandTotal: totals.grandTotal,
+          netReceived: totals.netReceived,
+          items: {
+            create: input.items.map((item, idx) => ({
+              productId: item.productId ?? null,
+              lineNumber: idx + 1,
+              productCode: item.productCode ?? null,
+              description: item.description,
+              unit: item.unit,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discount: item.discount ?? 0,
+              lineTotal: lineTotal(item),
+              vatable: item.vatable ?? true,
+            })),
+          },
+        },
+        include: { items: { orderBy: { lineNumber: 'asc' } } },
+      });
+    });
+
+    return this.toDto(updated);
+  }
+
   async confirm(
     type: DocumentType,
     companyId: string,

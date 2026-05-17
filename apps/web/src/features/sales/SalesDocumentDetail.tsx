@@ -72,6 +72,7 @@ export function SalesDocumentDetail({
   const [voidOpen, setVoidOpen] = useState(false);
 
   const role = getUser()?.role;
+  const canEdit = doc?.status === 'DRAFT' && (role === 'OWNER' || role === 'ADMIN');
   const canConfirm = doc?.status === 'DRAFT' && (role === 'OWNER' || role === 'ADMIN');
   const canVoid =
     doc &&
@@ -259,6 +260,14 @@ export function SalesDocumentDetail({
               >
                 ดาวน์โหลด PDF จริง
               </button>
+            )}
+            {canEdit && (
+              <Link
+                href={`${meta.listHref}/${id}/edit` as any}
+                className="rounded-md border border-brand/40 bg-brand/5 px-3.5 py-2 text-[13px] font-medium text-brand hover:bg-brand/10"
+              >
+                แก้ไข
+              </Link>
             )}
             {canConfirm && (
               <button
