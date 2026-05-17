@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { Modal } from '@/components/ui/Modal';
 import { StatCard } from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
-import { api, apiBlob } from '@/lib/api';
+import { ApiError, api, apiBlob } from '@/lib/api';
 import { getUser } from '@/lib/auth';
 import { formatThaiCurrency, formatThaiDateTime } from '@/lib/format';
 
@@ -51,6 +51,14 @@ const STATUS_META: Record<AiSuggestionStatus, { label: string; cls: string }> = 
   OVERRIDDEN: { label: 'แก้ไข', cls: 'border-info/40 bg-info/10 text-info' },
 };
 
+interface DuplicateInfo {
+  duplicateKind?: 'AI_SUGGESTION' | 'EXPENSE_RECEIPT';
+  duplicateStatus?: string;
+  duplicateFileName?: string | null;
+  duplicateUploadedAt?: string;
+  attemptedFileName: string;
+}
+
 export default function AiInboxPage() {
   const toast = useToast();
   const [rows, setRows] = useState<SuggestionRow[]>([]);
@@ -59,6 +67,7 @@ export default function AiInboxPage() {
   const [statusFilter, setStatusFilter] = useState<AiSuggestionStatus | ''>('PENDING');
   const [reviewing, setReviewing] = useState<SuggestionRow | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
 
   const role = getUser()?.role;
   const canAct = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
@@ -95,7 +104,22 @@ export default function AiInboxPage() {
       toast.success('AI กำลังประมวลผลเอกสาร — ดูใน inbox ด้านล่าง');
       load();
     } catch (e: any) {
-      toast.error(e.message ?? 'อัปโหลดล้มเหลว');
+      if (
+        e instanceof ApiError &&
+        e.status === 409 &&
+        (e.body as any)?.code === 'AI_INBOX_DUPLICATE'
+      ) {
+        const body = e.body as any;
+        setDuplicate({
+          duplicateKind: body.duplicateKind,
+          duplicateStatus: body.duplicateStatus,
+          duplicateFileName: body.duplicateFileName,
+          duplicateUploadedAt: body.duplicateUploadedAt,
+          attemptedFileName: file.name,
+        });
+      } else {
+        toast.error(e.message ?? 'อัปโหลดล้มเหลว');
+      }
     } finally {
       setUploading(false);
     }
@@ -248,7 +272,81 @@ export default function AiInboxPage() {
           load();
         }}
       />
+
+      <DuplicateAlert info={duplicate} onClose={() => setDuplicate(null)} />
     </>
+  );
+}
+
+function DuplicateAlert({
+  info,
+  onClose,
+}: {
+  info: DuplicateInfo | null;
+  onClose: () => void;
+}) {
+  const kindLabel =
+    info?.duplicateKind === 'EXPENSE_RECEIPT'
+      ? 'ใบเสร็จในระบบ'
+      : 'AI Inbox';
+  const statusLabel =
+    info?.duplicateStatus &&
+    (STATUS_META[info.duplicateStatus as AiSuggestionStatus]?.label ??
+      info.duplicateStatus);
+  return (
+    <Modal
+      open={!!info}
+      onClose={onClose}
+      title="ไฟล์ซ้ำ — ยกเลิกการอัปโหลด"
+      size="md"
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+        >
+          เข้าใจแล้ว
+        </button>
+      }
+    >
+      {info && (
+        <div className="space-y-3 text-[13.5px]">
+          <div className="rounded-md border border-warn/40 bg-warn/10 p-3 text-warn">
+            ไฟล์นี้เคยถูกอัปโหลดเข้าระบบแล้ว — ระบบจะไม่เพิ่มซ้ำเพื่อป้องกันใบเสร็จซ้อน
+          </div>
+          <div className="grid grid-cols-[110px_1fr] gap-y-2 text-text-soft">
+            <div className="text-text-mute">ไฟล์ที่ลอง:</div>
+            <div className="font-medium text-text">{info.attemptedFileName}</div>
+
+            <div className="text-text-mute">พบที่:</div>
+            <div className="text-text">{kindLabel}</div>
+
+            {info.duplicateFileName && (
+              <>
+                <div className="text-text-mute">ชื่อเดิม:</div>
+                <div className="text-text">{info.duplicateFileName}</div>
+              </>
+            )}
+
+            {statusLabel && (
+              <>
+                <div className="text-text-mute">สถานะ:</div>
+                <div className="text-text">{statusLabel}</div>
+              </>
+            )}
+
+            {info.duplicateUploadedAt && (
+              <>
+                <div className="text-text-mute">อัปโหลดเมื่อ:</div>
+                <div className="text-text">
+                  {formatThaiDateTime(info.duplicateUploadedAt)}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
 

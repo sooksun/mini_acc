@@ -79,6 +79,50 @@ export class AiInboxService {
     }
 
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
+
+    // Dedup — same bytes uploaded twice for the same company should not
+    // create a second suggestion or expense receipt. Mirrors H6 dedup in
+    // ExpenseReceiptsService.upload. Check inbox first (sha256 lives in JSON
+    // payload), then the canonical expense-receipts table.
+    const existingSuggestion = await this.prisma.aiSuggestion.findFirst({
+      where: {
+        companyId,
+        payload: { path: '$.sha256', equals: sha256 },
+      },
+      select: { id: true, status: true, payload: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existingSuggestion) {
+      const p = existingSuggestion.payload as unknown as AiSuggestionPayload;
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'AI_INBOX_DUPLICATE',
+        message: `ไฟล์นี้เคยถูกอัปโหลดเข้า AI Inbox แล้ว (${p.originalFileName ?? 'ไม่ทราบชื่อ'}) สถานะ ${existingSuggestion.status}`,
+        duplicateKind: 'AI_SUGGESTION',
+        duplicateOf: existingSuggestion.id,
+        duplicateStatus: existingSuggestion.status,
+        duplicateFileName: p.originalFileName ?? null,
+        duplicateUploadedAt: existingSuggestion.createdAt.toISOString(),
+      });
+    }
+    const existingReceipt = await this.prisma.expenseReceipt.findFirst({
+      where: { companyId, sha256 },
+      select: { id: true, status: true, originalFileName: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existingReceipt) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'AI_INBOX_DUPLICATE',
+        message: `ไฟล์นี้ถูกบันทึกเป็นใบเสร็จในระบบแล้ว (${existingReceipt.originalFileName}) สถานะ ${existingReceipt.status}`,
+        duplicateKind: 'EXPENSE_RECEIPT',
+        duplicateOf: existingReceipt.id,
+        duplicateStatus: existingReceipt.status,
+        duplicateFileName: existingReceipt.originalFileName,
+        duplicateUploadedAt: existingReceipt.createdAt.toISOString(),
+      });
+    }
+
     const { relativePath, absolutePath } = await this.persistFile(companyId, file);
     let committed = false;
     try {
