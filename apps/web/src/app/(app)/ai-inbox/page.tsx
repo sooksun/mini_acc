@@ -95,6 +95,18 @@ export default function AiInboxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
+  // Lock body scroll while uploading so the overlay covers the full viewport
+  // (mirrors the pattern in Modal). Also blocks Escape from removing focus
+  // from background-hidden interactive elements.
+  useEffect(() => {
+    if (!uploading) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [uploading]);
+
   async function uploadFile(file: File) {
     setUploading(true);
     try {
@@ -274,7 +286,41 @@ export default function AiInboxPage() {
       />
 
       <DuplicateAlert info={duplicate} onClose={() => setDuplicate(null)} />
+
+      <UploadingOverlay open={uploading} />
     </>
+  );
+}
+
+function UploadingOverlay({ open }: { open: boolean }) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-label="กำลังอัปโหลดเอกสาร"
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.preventDefault()}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-hidden />
+      <div className="relative z-10 flex min-w-[280px] flex-col items-center gap-4 rounded-xl border border-border bg-surface px-8 py-6 shadow-2xl">
+        <div className="relative h-14 w-14">
+          <span className="absolute inset-0 animate-ping rounded-full bg-brand/30" />
+          <span className="absolute inset-0 animate-spin rounded-full border-[3px] border-border border-t-brand" />
+        </div>
+        <div className="text-center">
+          <div className="text-[14px] font-semibold text-text">กำลังอัปโหลดเอกสาร</div>
+          <div className="mt-1 text-[12px] text-text-mute">
+            AI กำลังอ่านข้อมูล กรุณารอสักครู่
+            <span className="ml-0.5 inline-flex w-3 justify-start">
+              <span className="animate-pulse">…</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
