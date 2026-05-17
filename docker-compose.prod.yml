@@ -61,12 +61,20 @@ services:
       AI_INBOX_DISABLED: ${AI_INBOX_DISABLED:-0}
       ATTACHMENT_DIR: /var/lib/hj-account/attachments
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
+      # Path inside the container where pdf-templates/logo.ts will read the
+      # company logo PNG from. We mount it as read-only from the host's
+      # apps/web/public/logo.png below. Falls back to "SN" text if missing.
+      LOGO_PATH: /app/branding/logo.png
     extra_hosts:
       # Lets the api container reach services bound to the host's LAN IP
       # (e.g. an external MariaDB) by the name `host.docker.internal`.
       - "host.docker.internal:host-gateway"
     volumes:
       - attachments:/var/lib/hj-account/attachments
+      # Logo for sales-document PDFs. apps/web/public/logo.png is the same
+      # file the web app serves; mount it read-only into the api container
+      # so PdfTemplateService can base64-inline it.
+      - ./apps/web/public/logo.png:/app/branding/logo.png:ro
     ports:
       - "9931:4000"
     networks: [hj-net]
