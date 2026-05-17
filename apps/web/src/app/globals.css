@@ -54,15 +54,15 @@
   --surface-3: #1d1d48;
   --border:    rgba(139, 130, 255, 0.13);
   --border-2:  rgba(139, 130, 255, 0.25);
-  --text:      #ecebff;
-  --text-soft: #b6b3e6;
-  --text-mute: #8682b3;
-  --text-faint:#5a5786;
+  --text:      #f3f2ff;
+  --text-soft: #d4d1f0;
+  --text-mute: #a8a5d2;
+  --text-faint:#8784b2;
 
-  --ok:    #4ade80;
-  --warn:  #fbbf24;
-  --bad:   #f87171;
-  --info:  #60a5fa;
+  --ok:    #6ee7a4;
+  --warn:  #fcd34d;
+  --bad:   #fca5a5;
+  --info:  #93c5fd;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 8px 28px -8px rgba(0, 0, 0, 0.6);
