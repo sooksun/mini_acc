@@ -23,6 +23,29 @@ export interface ExtractedExpense {
   grandTotal?: string;
 }
 
+// Match server-side DTOs (accept-suggestion.dto.ts, upload-expense-receipt.dto.ts).
+// AI sometimes returns garbage like "874436547" (9-digit US-style EIN) for
+// foreign vendors — we strip those at extraction time so the operator's review
+// form starts clean instead of failing validation at submit.
+const TAX_ID_RE = /^\d{13}$/;
+const MONEY_RE = /^-?\d+(\.\d{1,2})?$/;
+
+export function sanitizeExtractedExpense(raw: ExtractedExpense): ExtractedExpense {
+  const out: ExtractedExpense = { ...raw };
+  if (out.vendorTaxId !== undefined) {
+    const cleaned = out.vendorTaxId.replace(/[\s-]/g, '').trim();
+    out.vendorTaxId = TAX_ID_RE.test(cleaned) ? cleaned : undefined;
+  }
+  for (const f of ['subtotal', 'vatAmount', 'withholdingTaxAmount', 'grandTotal'] as const) {
+    const v = out[f];
+    if (v !== undefined) {
+      const cleaned = v.replace(/,/g, '').trim();
+      out[f] = MONEY_RE.test(cleaned) ? cleaned : undefined;
+    }
+  }
+  return out;
+}
+
 export interface ExtractionResult {
   payload: ExtractedExpense;
   confidence: number;
@@ -82,7 +105,7 @@ export class OpenRouterClient {
 Return ONLY a JSON object with these keys (omit any you can't find with high confidence):
 {
   "vendorName": string,
-  "vendorTaxId": string (13 digits),
+  "vendorTaxId": string (EXACTLY 13 numeric digits — Thai tax ID format only. OMIT this field for foreign vendors / non-Thai tax IDs / anything shorter or longer than 13 digits),
   "documentNumber": string,
   "documentDate": string (YYYY-MM-DD),
   "paidAt": string (YYYY-MM-DD),
@@ -144,10 +167,11 @@ ${(opts.text ?? '(no text extracted)').slice(0, 8000)}`;
       const { confidence, ...payload } = parsed;
       const clamped =
         typeof confidence === 'number' ? Math.max(0, Math.min(1, confidence)) : 0.7;
+      const sanitized = sanitizeExtractedExpense(payload);
       this.logger.log(
         `openrouter.extract.done fileName=${opts.fileName} model=${model} durationMs=${Date.now() - startedAt} confidence=${clamped}`,
       );
-      return { payload, confidence: clamped, model, mocked: false };
+      return { payload: sanitized, confidence: clamped, model, mocked: false };
     } catch (err) {
       const isTimeout =
         err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
