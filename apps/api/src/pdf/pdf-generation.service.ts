@@ -104,7 +104,11 @@ export class PdfGenerationService {
 }
 
 export function getStoragePath(): string {
-  return path.resolve(process.cwd(), 'var', 'generated_pdfs');
+  // Production: ATTACHMENT_DIR is bind-mounted to a docker volume that
+  // persists across container recreates. Default fallback keeps dev (no env)
+  // behaviour identical to before (./var/generated_pdfs under cwd).
+  const root = process.env.ATTACHMENT_DIR ?? path.resolve(process.cwd(), 'var');
+  return path.resolve(root, 'generated_pdfs');
 }
 
 export async function ensureStorageDir(): Promise<string> {
