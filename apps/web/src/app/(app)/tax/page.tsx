@@ -18,9 +18,13 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
  * inline (the browser's native PDF viewer handles printing).
  *
  * We can't just put the URL in <a target="_blank"> because the API requires
- * Authorization header. Instead we fetch as blob then open via blob URL.
+ * Authorization header. Instead we fetch as blob then navigate the popup.
+ *
+ * The popup MUST be opened by the caller synchronously inside the click
+ * handler (before any await), otherwise the browser's popup blocker will
+ * swallow it.
  */
-async function openAuthedPdf(path: string): Promise<void> {
+async function openAuthedPdf(path: string, popup: Window): Promise<void> {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -31,11 +35,7 @@ async function openAuthedPdf(path: string): Promise<void> {
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  const popup = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!popup) {
-    URL.revokeObjectURL(url);
-    throw new Error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
-  }
+  popup.location.href = url;
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
@@ -125,17 +125,29 @@ export default function TaxPage() {
   }
 
   async function printCert(row: WhtRow) {
+    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
+    if (!popup) {
+      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+      return;
+    }
     try {
-      await openAuthedPdf(`/tax/wht/certificate/${row.id}`);
+      await openAuthedPdf(`/tax/wht/certificate/${row.id}`, popup);
     } catch (e: any) {
+      popup.close();
       toast.error(e.message ?? 'พิมพ์ 50 ทวิ ล้มเหลว');
     }
   }
 
   async function printPnd(form: 'PND3' | 'PND53') {
+    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
+    if (!popup) {
+      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+      return;
+    }
     try {
-      await openAuthedPdf(`/tax/wht/pnd-summary/${year}/${month}/${form}`);
+      await openAuthedPdf(`/tax/wht/pnd-summary/${year}/${month}/${form}`, popup);
     } catch (e: any) {
+      popup.close();
       toast.error(e.message ?? `พิมพ์ ${form === 'PND3' ? 'ภ.ง.ด.3' : 'ภ.ง.ด.53'} ล้มเหลว`);
     }
   }

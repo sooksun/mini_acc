@@ -150,19 +150,21 @@ export function ExpenseReceiptsPage() {
   }
 
   async function viewFile(receipt: ExpenseReceipt) {
+    // Open the tab synchronously inside the click handler — popup blockers
+    // require the window.open() call to be within the original user gesture,
+    // so we cannot wait for the fetch to finish first.
+    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
+    if (!popup) {
+      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+      return;
+    }
     try {
       const blob = await apiBlob(`/expense-receipts/${receipt.id}/file`);
       const url = URL.createObjectURL(blob);
-      const popup = window.open(url, '_blank', 'noopener,noreferrer');
-      if (!popup) {
-        toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
-        URL.revokeObjectURL(url);
-        return;
-      }
-      // Browsers may render directly from the blob URL; revoke after the user has
-      // had time to load it. 60s is conservative.
+      popup.location.href = url;
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e: any) {
+      popup.close();
       toast.error(e.message ?? 'เปิดไฟล์ไม่สำเร็จ');
     }
   }

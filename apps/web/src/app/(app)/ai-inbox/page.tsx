@@ -503,12 +503,21 @@ function ReviewModal({
 
   async function viewFile() {
     if (!suggestion) return;
+    // Open popup synchronously inside the click handler so the browser's
+    // popup blocker treats it as user-initiated; navigate to the blob URL
+    // once the fetch resolves.
+    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
+    if (!popup) {
+      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+      return;
+    }
     try {
       const blob = await apiBlob(`/ai-inbox/${suggestion.id}/file`);
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      popup.location.href = url;
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e: any) {
+      popup.close();
       toast.error(e.message ?? 'เปิดไฟล์ไม่สำเร็จ');
     }
   }

@@ -130,12 +130,20 @@ export function SalesDocumentDetail({
   }
 
   async function handlePreviewPdf() {
+    // Open popup synchronously inside the click handler so the popup blocker
+    // treats it as user-initiated; navigate to the blob URL after fetch.
+    const popup = window.open('about:blank', '_blank');
+    if (!popup) {
+      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
+      return;
+    }
     try {
       const blob = await apiBlob(`${meta.pdfBase}/${id}/preview`);
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      popup.location.href = url;
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e: any) {
+      popup.close();
       toast.error('ดู PDF ไม่สำเร็จ: ' + e.message);
     }
   }
