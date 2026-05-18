@@ -83,7 +83,7 @@ export function DataTable<T>({
                   return (
                     <td
                       key={col.key}
-                      className={`px-4 py-3 ${alignCls(col.align)} ${col.numeric ? 'font-mono tabular-nums' : ''}`}
+                      className={`px-4 py-3 text-text ${alignCls(col.align)} ${col.numeric ? 'font-mono tabular-nums' : ''}`}
                     >
                       {content}
                     </td>

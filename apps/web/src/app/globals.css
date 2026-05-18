@@ -101,3 +101,11 @@ body {
 [data-theme="dark"] .text-text-soft  { color: #b9a8ed !important; }
 [data-theme="dark"] .text-text-mute  { color: #9889cf !important; }
 [data-theme="dark"] .text-text-faint { color: #776aa8 !important; }
+
+/* Browser UA stylesheets sometimes break the `body { color }` inheritance
+   chain on table cells, so cells without an explicit text-* class render
+   in the OS default (near-black on dark bg = invisible). Force the
+   primary text color on bare tbody td elements as a safety net. */
+[data-theme="dark"] tbody td:not([class*="text-"]) {
+  color: #dccfff;
+}
