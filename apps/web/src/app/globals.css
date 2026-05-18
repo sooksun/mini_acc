@@ -54,10 +54,10 @@
   --surface-3: #1d1d48;
   --border:    rgba(139, 130, 255, 0.13);
   --border-2:  rgba(139, 130, 255, 0.25);
-  --text:      #ffffff;
-  --text-soft: #e5e3f7;
-  --text-mute: #c2bfe2;
-  --text-faint:#a5a2cf;
+  --text:      #e8e6f8;
+  --text-soft: #c5c2de;
+  --text-mute: #a39fc6;
+  --text-faint:#8784b2;
 
   --ok:    #6ee7a4;
   --warn:  #fcd34d;
@@ -94,30 +94,10 @@ body {
     radial-gradient(70% 60% at 50% 120%, color-mix(in oklab, var(--grad-via) 22%, transparent) 0%, transparent 65%);
 }
 
-/* Dark-mode text-readability hard-override.
-   Forces every Tailwind text tier to bright values regardless of inline styles
-   or third-party CSS that might shadow the variables. */
-[data-theme="dark"] body,
-[data-theme="dark"] table,
-[data-theme="dark"] td,
-[data-theme="dark"] th,
-[data-theme="dark"] p,
-[data-theme="dark"] span,
-[data-theme="dark"] div,
-[data-theme="dark"] li,
-[data-theme="dark"] h1,
-[data-theme="dark"] h2,
-[data-theme="dark"] h3,
-[data-theme="dark"] h4,
-[data-theme="dark"] label,
-[data-theme="dark"] input,
-[data-theme="dark"] select,
-[data-theme="dark"] textarea,
-[data-theme="dark"] button {
-  color: #ffffff;
-}
-
-[data-theme="dark"] .text-text       { color: #ffffff !important; }
-[data-theme="dark"] .text-text-soft  { color: #ebe9fa !important; }
-[data-theme="dark"] .text-text-mute  { color: #cfcce8 !important; }
-[data-theme="dark"] .text-text-faint { color: #b3b0d4 !important; }
+/* Dark-mode text-tier fallbacks — keep contrast comfortable, not glaring.
+   Ensures the four text tiers stay legible even if a parent inline style
+   shadows the variables. */
+[data-theme="dark"] .text-text       { color: #e8e6f8 !important; }
+[data-theme="dark"] .text-text-soft  { color: #c5c2de !important; }
+[data-theme="dark"] .text-text-mute  { color: #a39fc6 !important; }
+[data-theme="dark"] .text-text-faint { color: #8784b2 !important; }
