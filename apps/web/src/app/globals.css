@@ -93,3 +93,31 @@ body {
     radial-gradient(50% 40% at 92% 14%, color-mix(in oklab, var(--grad-to) 28%, transparent) 0%, transparent 65%),
     radial-gradient(70% 60% at 50% 120%, color-mix(in oklab, var(--grad-via) 22%, transparent) 0%, transparent 65%);
 }
+
+/* Dark-mode text-readability hard-override.
+   Forces every Tailwind text tier to bright values regardless of inline styles
+   or third-party CSS that might shadow the variables. */
+[data-theme="dark"] body,
+[data-theme="dark"] table,
+[data-theme="dark"] td,
+[data-theme="dark"] th,
+[data-theme="dark"] p,
+[data-theme="dark"] span,
+[data-theme="dark"] div,
+[data-theme="dark"] li,
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] label,
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea,
+[data-theme="dark"] button {
+  color: #ffffff;
+}
+
+[data-theme="dark"] .text-text       { color: #ffffff !important; }
+[data-theme="dark"] .text-text-soft  { color: #ebe9fa !important; }
+[data-theme="dark"] .text-text-mute  { color: #cfcce8 !important; }
+[data-theme="dark"] .text-text-faint { color: #b3b0d4 !important; }
