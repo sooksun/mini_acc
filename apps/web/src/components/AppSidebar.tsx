@@ -164,7 +164,7 @@ export function AppSidebar({ user }: { user: { fullName: string; initial: string
                 onClick={() => toggleGroup(g.key)}
                 aria-expanded={isOpen}
                 className={`flex items-center justify-between rounded-[10px] px-3 py-1.5 text-[10.5px] uppercase tracking-[0.12em] transition-colors hover:bg-surface-3 ${
-                  hasActive ? 'text-text' : 'text-text-faint hover:text-text-soft'
+                  hasActive ? 'text-text' : 'text-text-mute hover:text-text'
                 }`}
               >
                 <span>{g.group}</span>
