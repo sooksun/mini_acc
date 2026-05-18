@@ -54,10 +54,10 @@
   --surface-3: #1d1d48;
   --border:    rgba(139, 130, 255, 0.13);
   --border-2:  rgba(139, 130, 255, 0.25);
-  --text:      #e8e6f8;
-  --text-soft: #c5c2de;
-  --text-mute: #a39fc6;
-  --text-faint:#8784b2;
+  --text:      #dccfff;
+  --text-soft: #b9a8ed;
+  --text-mute: #9889cf;
+  --text-faint:#776aa8;
 
   --ok:    #6ee7a4;
   --warn:  #fcd34d;
@@ -94,10 +94,10 @@ body {
     radial-gradient(70% 60% at 50% 120%, color-mix(in oklab, var(--grad-via) 22%, transparent) 0%, transparent 65%);
 }
 
-/* Dark-mode text-tier fallbacks — keep contrast comfortable, not glaring.
-   Ensures the four text tiers stay legible even if a parent inline style
-   shadows the variables. */
-[data-theme="dark"] .text-text       { color: #e8e6f8 !important; }
-[data-theme="dark"] .text-text-soft  { color: #c5c2de !important; }
-[data-theme="dark"] .text-text-mute  { color: #a39fc6 !important; }
-[data-theme="dark"] .text-text-faint { color: #8784b2 !important; }
+/* Dark-mode text — soft lavender palette tuned to the purple brand.
+   The !important overrides guarantee the four text tiers stay legible
+   even if a parent inline style shadows the CSS variables. */
+[data-theme="dark"] .text-text       { color: #dccfff !important; }
+[data-theme="dark"] .text-text-soft  { color: #b9a8ed !important; }
+[data-theme="dark"] .text-text-mute  { color: #9889cf !important; }
+[data-theme="dark"] .text-text-faint { color: #776aa8 !important; }
