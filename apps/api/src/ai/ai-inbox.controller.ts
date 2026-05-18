@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -100,5 +101,15 @@ export class AiInboxController {
     @Body() dto: RejectSuggestionDto,
   ) {
     return this.inbox.reject(user.companyId, user.id, id, dto);
+  }
+
+  @Delete(':id')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @AuditAction('AI_DELETE_SUGGESTION', {
+    entityType: 'AiSuggestion',
+    getEntityId: (req) => req.params['id'] as string,
+  })
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.inbox.softDelete(user.companyId, user.id, id);
   }
 }

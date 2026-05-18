@@ -5,6 +5,7 @@ import type { AiSuggestionStatus, AiSuggestionType } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { AiConfidenceBadge } from '@/components/ui/AiConfidenceBadge';
 import { AiExtractedField } from '@/components/ui/AiExtractedField';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { Modal } from '@/components/ui/Modal';
 import { StatCard } from '@/components/ui/StatCard';
@@ -95,6 +96,7 @@ export default function AiInboxPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<AiSuggestionStatus | ''>('PENDING');
   const [reviewing, setReviewing] = useState<SuggestionRow | null>(null);
+  const [deleting, setDeleting] = useState<SuggestionRow | null>(null);
   const [uploading, setUploading] = useState(false);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
 
@@ -166,6 +168,18 @@ export default function AiInboxPage() {
     }
   }
 
+  async function handleDelete() {
+    if (!deleting) return;
+    try {
+      await api(`/ai-inbox/${deleting.id}`, { method: 'DELETE' });
+      toast.success('ลบรายการแล้ว');
+      setDeleting(null);
+      load();
+    } catch (e: any) {
+      toast.error(e.message ?? 'ลบไม่สำเร็จ');
+    }
+  }
+
   const pendingCount = rows.filter((r) => r.status === 'PENDING').length;
   const acceptedCount = rows.filter((r) => r.status === 'ACCEPTED').length;
   const lowConfidence = rows.filter(
@@ -221,15 +235,32 @@ export default function AiInboxPage() {
       key: 'actions',
       header: '',
       align: 'right',
-      render: (s) =>
-        canAct && s.status === 'PENDING' ? (
-          <button
-            onClick={() => setReviewing(s)}
-            className="rounded-md border border-brand/40 bg-brand/5 px-2.5 py-1 text-[12px] text-brand hover:bg-brand/10"
-          >
-            ตรวจสอบ
-          </button>
-        ) : null,
+      render: (s) => {
+        if (!canAct) return null;
+        // ACCEPTED is the only link back to the staged suggestion for an
+        // existing receipt, so it can't be deleted from here.
+        const canDelete = s.status !== 'ACCEPTED';
+        return (
+          <div className="flex justify-end gap-2">
+            {s.status === 'PENDING' && (
+              <button
+                onClick={() => setReviewing(s)}
+                className="rounded-md border border-brand/40 bg-brand/5 px-2.5 py-1 text-[12px] text-brand hover:bg-brand/10"
+              >
+                ตรวจสอบ
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setDeleting(s)}
+                className="rounded-md border border-bad/40 bg-bad/5 px-2.5 py-1 text-[12px] text-bad hover:bg-bad/10"
+              >
+                ลบ
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -304,6 +335,20 @@ export default function AiInboxPage() {
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="ลบรายการนี้?"
+        description={
+          deleting
+            ? `จะลบ "${deleting.payload.originalFileName ?? 'รายการนี้'}" ออกจาก AI Inbox — ไฟล์ต้นฉบับที่ AI วางไว้จะถูกลบด้วย หากต้องการใช้ไฟล์อีกค่อยอัปโหลดใหม่`
+            : undefined
+        }
+        confirmLabel="ลบ"
+        destructive
+        onClose={() => setDeleting(null)}
+        onConfirm={handleDelete}
+      />
 
       <ReviewModal
         suggestion={reviewing}

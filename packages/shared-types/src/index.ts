@@ -272,6 +272,7 @@ export const AuditAction = {
   AI_EXTRACT_DOCUMENT: 'AI_EXTRACT_DOCUMENT',
   AI_ACCEPT_SUGGESTION: 'AI_ACCEPT_SUGGESTION',
   AI_REJECT_SUGGESTION: 'AI_REJECT_SUGGESTION',
+  AI_DELETE_SUGGESTION: 'AI_DELETE_SUGGESTION',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 

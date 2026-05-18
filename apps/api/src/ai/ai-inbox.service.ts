@@ -84,9 +84,12 @@ export class AiInboxService {
     // create a second suggestion or expense receipt. Mirrors H6 dedup in
     // ExpenseReceiptsService.upload. Check inbox first (sha256 lives in JSON
     // payload), then the canonical expense-receipts table.
+    // Soft-deleted suggestions are excluded so the operator can re-upload a
+    // file they previously removed from the inbox.
     const existingSuggestion = await this.prisma.aiSuggestion.findFirst({
       where: {
         companyId,
+        deletedAt: null,
         payload: { path: '$.sha256', equals: sha256 },
       },
       select: { id: true, status: true, payload: true, createdAt: true },
@@ -166,6 +169,7 @@ export class AiInboxService {
   async list(companyId: string, dto: ListSuggestionsDto) {
     const where: Prisma.AiSuggestionWhereInput = {
       companyId,
+      deletedAt: null,
       ...(dto.status ? { status: dto.status } : { status: 'PENDING' }),
       ...(dto.type ? { type: dto.type } : {}),
       ...(dto.sourceType ? { sourceType: dto.sourceType } : {}),
@@ -184,7 +188,9 @@ export class AiInboxService {
   }
 
   async findOne(companyId: string, id: string) {
-    const s = await this.prisma.aiSuggestion.findFirst({ where: { id, companyId } });
+    const s = await this.prisma.aiSuggestion.findFirst({
+      where: { id, companyId, deletedAt: null },
+    });
     if (!s) throw new NotFoundException('Suggestion not found');
     return this.toDto(s);
   }
@@ -202,7 +208,7 @@ export class AiInboxService {
     dto: AcceptSuggestionDto,
   ) {
     const suggestion = await this.prisma.aiSuggestion.findFirst({
-      where: { id, companyId },
+      where: { id, companyId, deletedAt: null },
     });
     if (!suggestion) throw new NotFoundException('Suggestion not found');
     if (suggestion.status !== 'PENDING') {
@@ -290,7 +296,7 @@ export class AiInboxService {
     dto: RejectSuggestionDto,
   ) {
     const suggestion = await this.prisma.aiSuggestion.findFirst({
-      where: { id, companyId },
+      where: { id, companyId, deletedAt: null },
     });
     if (!suggestion) throw new NotFoundException('Suggestion not found');
     if (suggestion.status !== 'PENDING') {
@@ -317,9 +323,49 @@ export class AiInboxService {
     return this.toDto(updated);
   }
 
+  /**
+   * Soft-delete a suggestion. The row stays in the DB for audit but is excluded
+   * from list/dedup queries. ACCEPTED rows are refused because they are the
+   * only link back to a created ExpenseReceipt — deleting them silently would
+   * orphan the receipt's audit trail.
+   */
+  async softDelete(companyId: string, userId: string, id: string) {
+    const suggestion = await this.prisma.aiSuggestion.findFirst({
+      where: { id, companyId, deletedAt: null },
+    });
+    if (!suggestion) throw new NotFoundException('Suggestion not found');
+    if (suggestion.status === 'ACCEPTED') {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'SUGGESTION_ALREADY_ACCEPTED',
+        message:
+          'รายการนี้รับเข้าระบบเป็นใบเสร็จไปแล้ว — ลบไม่ได้ ให้ไปยกเลิกที่ใบเสร็จแทน',
+      });
+    }
+
+    // Free the staged file from disk — once deleted there is no recovery path,
+    // and the JSON payload still records sha256 / originalFileName for audit.
+    const payload = suggestion.payload as unknown as AiSuggestionPayload;
+    if (payload?.storedPath) {
+      const absolutePath = this.resolveStoredPath(payload.storedPath);
+      await unlink(absolutePath).catch((err) =>
+        this.logger.warn(`Failed to delete soft-deleted file ${absolutePath}: ${err.message}`),
+      );
+    }
+
+    const updated = await this.prisma.aiSuggestion.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        deletedBy: userId,
+      },
+    });
+    return this.toDto(updated);
+  }
+
   async readStagedFile(companyId: string, id: string) {
     const suggestion = await this.prisma.aiSuggestion.findFirst({
-      where: { id, companyId },
+      where: { id, companyId, deletedAt: null },
     });
     if (!suggestion) throw new NotFoundException('Suggestion not found');
     const payload = suggestion.payload as unknown as AiSuggestionPayload;

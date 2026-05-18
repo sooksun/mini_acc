@@ -865,6 +865,12 @@ model AiSuggestion {
   acceptedBy      String?
   acceptedAt      DateTime?
   rejectionReason String?            @db.Text
+  // Soft-delete: when the operator removes a row from AI Inbox we keep the
+  // record (for audit) but exclude it from list/dedup queries. ACCEPTED rows
+  // can't be soft-deleted because they're the only link back to the staged
+  // suggestion that produced an existing ExpenseReceipt.
+  deletedAt       DateTime?
+  deletedBy       String?
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -874,6 +880,7 @@ model AiSuggestion {
   @@index([companyId, status, createdAt])
   @@index([companyId, type, status])
   @@index([sourceType, sourceId])
+  @@index([companyId, deletedAt])
 }
 
 model InventoryMovement {
