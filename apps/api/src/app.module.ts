@@ -26,6 +26,7 @@ import { AiModule } from './ai/ai.module';
 import { BankModule } from './bank/bank.module';
 import { HealthModule } from './health/health.module';
 import { ReportsModule } from './reports/reports.module';
+import { SystemModule } from './system/system.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { ReportsModule } from './reports/reports.module';
     BankModule,
     HealthModule,
     ReportsModule,
+    SystemModule,
   ],
   providers: [
     {

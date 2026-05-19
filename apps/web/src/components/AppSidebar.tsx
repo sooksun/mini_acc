@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { clearSession } from '@/lib/auth';
 
-type NavItem = { href: string; label: string; pill?: number };
+type NavItem = { href: string; label: string; pill?: number; roles?: string[] };
 type NavGroup = { key: string; group: string; items: NavItem[]; defaultOpen: boolean };
 
 const NAV: NavGroup[] = [
@@ -83,6 +83,7 @@ const NAV: NavGroup[] = [
       { href: '/settings/users', label: 'ผู้ใช้และสิทธิ์' },
       { href: '/settings/document-numbering', label: 'เลขเอกสาร' },
       { href: '/settings/audit-log', label: 'บันทึกการตรวจสอบ' },
+      { href: '/settings/danger', label: 'โซนอันตราย', roles: ['OWNER'] },
     ],
   },
 ];
@@ -181,7 +182,7 @@ export function AppSidebar({ user }: { user: { fullName: string; initial: string
               </button>
               {isOpen && (
                 <div className="flex flex-col gap-0.5">
-                  {g.items.map((item) => {
+                  {g.items.filter((item) => !item.roles || item.roles.includes(user?.role ?? '')).map((item) => {
                     const active = pathname?.startsWith(item.href);
                     return (
                       <Link

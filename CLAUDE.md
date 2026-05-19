@@ -8,7 +8,7 @@ pnpm workspace with three packages: `apps/api` (NestJS), `apps/web` (Next.js 15 
 
 Phase 0 (Foundation) is done. Phase 1 (Sales + PDF) is in progress — the API has all six sales document types (`QUOTATION / DELIVERY_NOTE / INVOICE / RECEIPT / TAX_INVOICE / RECEIPT_TAX_INVOICE`) wired through `SalesDocumentService → NumberingService → DocumentLifecycleService`, plus `PdfGenerationService` (preview synchronous, generate via BullMQ). The web app has login + `(app)` group with sidebar and sales pages.
 
-**Still not a git repo.** `git status` returns "fatal: not a git repository". Initialize one before non-trivial work — the audit-log philosophy of the product itself should be mirrored in source history.
+**Git repo initialized.** Remote: `https://github.com/sooksun/mini_acc.git`. Production is live at `https://accounting.cnppai.com`.
 
 Source-of-truth specs (Thai):
 
@@ -153,7 +153,8 @@ The `AI_AGENT` role can read, extract, suggest, and flag risks. It **cannot** co
 
 ### Tax safety
 - `TAX_INVOICE` may only be issued when the document date is on/after `Company.vatEffectiveDate`. Enforced in `SalesDocumentService.assertVatEligible()` — throws 422 `VAT_NOT_EFFECTIVE`.
-- `TAX_INVOICE` and `RECEIPT_TAX_INVOICE` additionally require `customer.taxId` (throws 400 `CUSTOMER_TAX_ID_REQUIRED` in the per-type service's `preValidate` hook). See `tax-invoices.service.ts` for the pattern — copy it for any new VAT-bearing doc type.
+- `TAX_INVOICE` and `RECEIPT_TAX_INVOICE` require `customer.taxId` — must be exactly **13 digits** (`/^\d{13}$/`). Throws 400 `CUSTOMER_TAX_ID_REQUIRED` (missing) or `CUSTOMER_TAX_ID_INVALID` (wrong format).
+- **Validation timing**: taxId presence + format check fires at both `create()` (per-type preValidate, early UX feedback) and `confirm()` (hard gate). `assertVatEligible()` fires **only at `confirm()`** — NOT at `create()`. Creating a DRAFT with any date must always succeed; the date is validated when the document is confirmed. Never move `assertVatEligible` back into `create()`.
 - VAT/WHT logic is **rule-based and configurable**, never hard-coded constants. Uncertain rows go to `PENDING_ACCOUNTANT`, not auto-decided.
 
 ### PDF as evidence
@@ -166,6 +167,7 @@ Product-defining, not cosmetic (PRD §9):
 - **Storage**: UTC ISO datetime in DB, ISO strings on the API.
 - **Display**: every user-visible date renders in `th-TH-u-ca-buddhist` with `timeZone: 'Asia/Bangkok'`. Example: stored `2026-05-10T03:30:00Z` → shown `10 พฤษภาคม 2569`.
 - **Never** surface raw ISO dates in the UI or PDFs. The reference implementations of `formatThaiDate / formatThaiDateShort / formatThaiDateTime / numberToThaiBahtText` already live in `apps/web/src/lib/format.ts` — use them everywhere; the PDF service uses an equivalent server-side copy.
+- **Default date values**: always use `localDateString()` from `apps/web/src/lib/format.ts` — never `new Date().toISOString().slice(0,10)`. `.toISOString()` converts to UTC which causes an off-by-one bug before 07:00 Bangkok time (UTC+7).
 - Money in PDFs needs `numberToThaiBahtText` (e.g. `93,457.94 → เก้าหมื่นสามพันสี่ร้อยห้าสิบเจ็ดบาทเก้าสิบสี่สตางค์`, PRD §12.3).
 
 ## Document numbering
@@ -228,6 +230,7 @@ Dependency rule when refactoring: A → B → C → D → E → F (no cycles, no
 - Per-type sales services (e.g. `TaxInvoicesService`) are thin facades that pass type-specific `preValidate` hooks into the shared `SalesDocumentService.create()`. Add a new sales doc type by mirroring this pattern, **not** by copying the shared service.
 - Controllers carry `@AuditAction(...)` decorators; the global `AuditLogInterceptor` records on success only. Provide `getEntityId` / `getReason` / `getMetadata` callbacks to extract fields from `req` or the response.
 - All authed routes use `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles(...)` + `@CurrentUser() user: AuthUser`. `companyId` always comes from `user.companyId` — never trust a `companyId` from the request body.
+- **RBAC — OWNER protection**: `ADMIN` cannot create or edit `OWNER` accounts. Guard lives in `UsersService.create()` and `UsersService.update()` — both accept `currentUserRole: Role` and throw `ForbiddenException` if a non-OWNER tries to touch an OWNER row. Never relax this server-side; frontend hides the button/option as UX only.
 
 ## MVP scope
 
@@ -259,10 +262,34 @@ Read these to understand the intended UI before recreating it in Next.js:
 
 Eighteen modules total. Listed here so you can sequence work without re-reading the PRD: Auth, Company Settings, Users & Roles, Partners, Document Upload & Attachments, AI Document Inbox, Sales Documents, Purchase/Expense, Payments, Projects, Inventory, Fixed Assets, VAT/WHT, Journal, Bank Reconciliation, AI Risk Center, Month-End Closing, Accountant Pack. Sprint sequencing is in PRD §26.
 
-Done so far: Auth, Company Settings (read-only), Users & Roles (no UI), Partners (CUSTOMER/VENDOR), Sales Documents (all 6 types, lifecycle + numbering, PDF preview/queue).
+Done so far: Auth, Company Settings (read-only), Users & Roles (no UI), Partners (CUSTOMER/VENDOR), Sales Documents (all 6 types, lifecycle + numbering, PDF preview/queue), AI Inbox, Expenses/Receipts, Inventory, Assets, Bank Reconciliation stub, Risk Center stub, Closing, Accountant Pack stub.
 
 ## Working in this directory
 
 - Path is `D:/laragon/www/mini_acc` under Laragon — runs on Node, **not** under Laragon's PHP/Apache. Backend NestJS on `:4000`, frontend Next.js on `:3000`, DB is **Laragon's MySQL on `:3306`** (user `root`, no password — default Laragon). Do **not** run `pnpm db:up`; it would start the dockerized MariaDB on the same port and collide.
-- **Not a git repo yet.** Initialize one before non-trivial work — the audit-log philosophy of the product itself should be mirrored in the source history.
+- **Git repo initialized.** Remote `https://github.com/sooksun/mini_acc.git`, main branch `master`.
 - The user works in Thai by default — replies, commit messages, and UI strings should be Thai unless asked otherwise.
+
+## Production deploy
+
+- **URL**: `https://accounting.cnppai.com`
+- **Server**: Ubuntu (CasaOS), deploy path `/DATA/AppData/www/mini_acc`
+- **Compose file**: `docker-compose.prod.yml` — services: `api` (:9931), `web` (:9930), `redis`, `backup`
+- **External DB**: MariaDB 11 on host via `host.docker.internal:3306`; password in `.env.production` (never commit)
+- **Reverse proxy**: Nginx Proxy Manager — `/api/` proxied to port 9931, `/` to port 9930
+
+Deploy commands after git push:
+```bash
+cd /DATA/AppData/www/mini_acc
+git pull origin master
+docker compose -f docker-compose.prod.yml --env-file .env.production build api web
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --force-recreate --no-deps api web
+docker compose -f docker-compose.prod.yml --env-file .env.production logs -f --tail=50 api web
+```
+
+## UI patterns (confirmed)
+
+- **File viewer popup**: open `window.open('about:blank', '_blank', 'noopener,noreferrer')` synchronously, then fetch blob and set `popup.location.href`. If `window.open` returns `null` (popup blocked), fall back to `a.download` — never show a "browser blocked" error to the user. See `ExpenseReceiptsPage.tsx` and `ai-inbox/page.tsx` for reference implementation.
+- **Date picker**: all date inputs use `ThaiDatePicker` component (`apps/web/src/components/ui/ThaiDatePicker.tsx`) — antd DatePicker + dayjs buddhistEra plugin. Accepts/returns ISO `YYYY-MM-DD`. Never use `<input type="date">` for user-facing date fields.
+- **Partner tax ID validation**: `PartnerPicker` blocks selection when `requireTaxId=true` and the partner's taxId is missing or not `/^\d{13}$/`. Shows distinct messages for missing vs. bad format.
+- **Product type badge**: `ProductTypeBadge` maps `GOOD → 'สินค้า'`, `SERVICE → 'บริการ'`, `MATERIAL → 'วัสดุ'`. Line items in `SalesDocumentForm` store `productType` in `ItemRow` and pass it as `value.type` to the badge.
