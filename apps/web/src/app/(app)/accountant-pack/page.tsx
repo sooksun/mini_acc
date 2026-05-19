@@ -174,10 +174,10 @@ export default function AccountantPackPage() {
 
   return (
     <>
-      <AppTopbar title="Accountant Pack" />
+      <AppTopbar title="แพ็กสำหรับนักบัญชี" />
       <div className="flex-1 px-7 pb-16 pt-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Accountant Pack Export</h1>
+          <h1 className="text-2xl font-bold tracking-tight">แพ็กสำหรับนักบัญชี</h1>
           <p className="mt-1 text-[13px] text-text-mute">
             ZIP สำหรับสำนักงานบัญชี — สร้างได้เฉพาะงวดที่ปิดและล็อกแล้ว
             ทุกตัวเลขย้อนกลับไปหา journal + เอกสารต้นทางได้

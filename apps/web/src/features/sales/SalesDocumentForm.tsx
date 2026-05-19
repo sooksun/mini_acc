@@ -11,12 +11,14 @@ import { Money } from '@/components/ui/Money';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { computeTotals, lineTotal } from '@/lib/quotation-totals';
-import { formatThaiDate, numberToThaiBahtText } from '@/lib/format';
+import { formatThaiDate, localDateString, numberToThaiBahtText } from '@/lib/format';
+import type { ProductType } from '@hj/shared-types';
 import type { DocTypeMeta } from './doc-type-meta';
 
 interface ItemRow {
   productId?: string;
   productCode?: string;
+  productType?: ProductType;
   description: string;
   unit: string;
   quantity: number;
@@ -90,7 +92,7 @@ export function SalesDocumentForm({
   const [documentDate, setDocumentDate] = useState(
     initial
       ? initial.documentDate.slice(0, 10)
-      : new Date().toISOString().slice(0, 10),
+      : localDateString(),
   );
   const [dueDate, setDueDate] = useState(initial?.dueDate?.slice(0, 10) ?? '');
   const [reference, setReference] = useState(initial?.reference ?? '');
@@ -160,6 +162,7 @@ export function SalesDocumentForm({
     updateRow(idx, {
       productId: p.id,
       productCode: p.code ?? undefined,
+      productType: p.type,
       description: p.nameTh,
       unit: p.unit,
       unitPrice: Number(p.unitPrice),
@@ -389,7 +392,7 @@ export function SalesDocumentForm({
                                     id: it.productId,
                                     code: it.productCode ?? null,
                                     nameTh: it.description,
-                                    type: 'SERVICE',
+                                    type: it.productType ?? 'SERVICE',
                                     unit: it.unit,
                                     unitPrice: String(it.unitPrice),
                                     vatable: it.vatable,

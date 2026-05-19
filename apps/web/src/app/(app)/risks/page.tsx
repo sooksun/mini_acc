@@ -162,11 +162,11 @@ export default function RisksPage() {
 
   return (
     <>
-      <AppTopbar title="Risk Center" />
+      <AppTopbar title="ศูนย์ความเสี่ยง" />
       <div className="flex-1 px-7 pb-16 pt-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Risk Center</h1>
+            <h1 className="text-2xl font-bold tracking-tight">ศูนย์ความเสี่ยง</h1>
             <p className="mt-1 text-[13px] text-text-mute">
               ความเสี่ยงที่ระบบตรวจพบ — ปิดงวดไม่ได้ถ้ายังมี CRITICAL ค้าง
             </p>

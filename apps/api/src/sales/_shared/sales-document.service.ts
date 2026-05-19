@@ -109,8 +109,7 @@ export class SalesDocumentService {
    * the controller level via @Roles.
    *
    * Replaces all items + recomputes totals. Re-resolves the customer snapshot
-   * if the customerId changed. preValidate (e.g. VAT-eligibility for
-   * TAX_INVOICE) is invoked the same way as create().
+   * if the customerId changed.
    */
   async update(
     type: DocumentType,
@@ -212,6 +211,25 @@ export class SalesDocumentService {
         include: { items: { orderBy: { lineNumber: 'asc' } } },
       });
       if (!doc) throw new NotFoundException('Document not found');
+
+      if (type === 'TAX_INVOICE' || type === 'RECEIPT_TAX_INVOICE') {
+        const snapshotTaxId = doc.customerSnapshotTaxId?.trim() ?? '';
+        if (!snapshotTaxId) {
+          throw new BadRequestException({
+            statusCode: 400,
+            code: 'CUSTOMER_TAX_ID_REQUIRED',
+            message: 'ลูกค้าในเอกสารนี้ยังไม่มีเลขประจำตัวผู้เสียภาษี — แก้ไขข้อมูลลูกค้าแล้วบันทึกเอกสารใหม่ก่อนยืนยัน',
+          });
+        }
+        if (!/^\d{13}$/.test(snapshotTaxId)) {
+          throw new BadRequestException({
+            statusCode: 400,
+            code: 'CUSTOMER_TAX_ID_INVALID',
+            message: 'เลขประจำตัวผู้เสียภาษีในเอกสารนี้ไม่ใช่ตัวเลข 13 หลัก — แก้ไขข้อมูลลูกค้าแล้วบันทึกเอกสารใหม่ก่อนยืนยัน',
+          });
+        }
+        await this.assertVatEligible(companyId, doc.documentDate.toISOString());
+      }
 
       validateTransition({ from: doc.status, to: 'USER_CONFIRMED', role });
 

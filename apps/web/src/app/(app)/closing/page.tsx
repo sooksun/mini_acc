@@ -162,7 +162,7 @@ export default function ClosingPage() {
       <AppTopbar title="ปิดงวดบัญชี" />
       <div className="flex-1 px-7 pb-16 pt-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Month-End Closing</h1>
+          <h1 className="text-2xl font-bold tracking-tight">ปิดงวดบัญชี</h1>
           <p className="mt-1 text-[13px] text-text-mute">
             ปิดงวดรายเดือนเมื่อเอกสารครบ + ไม่มีความเสี่ยงระดับ CRITICAL ค้าง
           </p>

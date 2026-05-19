@@ -49,11 +49,11 @@ export default function AuditLogPage() {
 
   return (
     <>
-      <AppTopbar title="Audit Log" />
+      <AppTopbar title="บันทึกการตรวจสอบ" />
       <div className="flex-1 px-7 pb-16 pt-6">
         <div className="flex items-end justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Audit Log</h1>
+            <h1 className="text-2xl font-bold tracking-tight">บันทึกการตรวจสอบ</h1>
             <p className="mt-1 text-[13px] text-text-mute">
               บันทึกการกระทำที่สำคัญทั้งหมด — ทุกตัวเลขในรายงานย้อนกลับมาที่นี่ได้
             </p>

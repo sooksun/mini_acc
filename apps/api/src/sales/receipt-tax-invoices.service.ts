@@ -14,8 +14,9 @@ export class ReceiptTaxInvoicesService {
       companyId,
       userId,
       dto,
-      async (cid, customer, input) => {
-        if (!customer.taxId?.trim()) {
+      async (_cid, customer) => {
+        const taxId = customer.taxId?.trim() ?? '';
+        if (!taxId) {
           throw new BadRequestException({
             statusCode: 400,
             code: 'CUSTOMER_TAX_ID_REQUIRED',
@@ -24,7 +25,14 @@ export class ReceiptTaxInvoicesService {
             customerId: customer.id,
           });
         }
-        await this.salesDoc.assertVatEligible(cid, input.documentDate);
+        if (!/^\d{13}$/.test(taxId)) {
+          throw new BadRequestException({
+            statusCode: 400,
+            code: 'CUSTOMER_TAX_ID_INVALID',
+            message: 'เลขประจำตัวผู้เสียภาษีของลูกค้าต้องเป็นตัวเลข 13 หลัก — แก้ไขในข้อมูลลูกค้าก่อน',
+            customerId: customer.id,
+          });
+        }
       },
     );
   }

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -31,7 +32,14 @@ export class UsersService {
     return users.map((u) => this.toDto(u));
   }
 
-  async create(companyId: string, dto: CreateUserDto) {
+  async create(companyId: string, currentUserRole: Role, dto: CreateUserDto) {
+    if (currentUserRole !== 'OWNER' && dto.role === 'OWNER') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'CANNOT_CREATE_OWNER',
+        message: 'ผู้ดูแลระบบ (ADMIN) ไม่สามารถสร้างบัญชีเจ้าของกิจการ (OWNER) ได้',
+      });
+    }
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) {
       throw new ConflictException({
@@ -54,9 +62,17 @@ export class UsersService {
     return this.toDto(created);
   }
 
-  async update(companyId: string, id: string, currentUserId: string, dto: UpdateUserDto) {
+  async update(companyId: string, id: string, currentUserId: string, currentUserRole: Role, dto: UpdateUserDto) {
     const user = await this.prisma.user.findFirst({ where: { id, companyId } });
     if (!user) throw new NotFoundException('User not found');
+
+    if (currentUserRole !== 'OWNER' && user.role === 'OWNER') {
+      throw new ForbiddenException({
+        statusCode: 403,
+        code: 'CANNOT_EDIT_OWNER',
+        message: 'ผู้ดูแลระบบ (ADMIN) ไม่สามารถแก้ไขบัญชีเจ้าของกิจการ (OWNER) ได้',
+      });
+    }
 
     // Refuse demoting / deactivating yourself — easy way to lose all admin access.
     if (id === currentUserId) {

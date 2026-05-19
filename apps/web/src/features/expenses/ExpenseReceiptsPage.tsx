@@ -150,21 +150,26 @@ export function ExpenseReceiptsPage() {
   }
 
   async function viewFile(receipt: ExpenseReceipt) {
-    // Open the tab synchronously inside the click handler — popup blockers
-    // require the window.open() call to be within the original user gesture,
-    // so we cannot wait for the fetch to finish first.
+    // window.open must be called synchronously within the click handler to avoid
+    // popup blockers. If it still gets blocked (null), fall back to download.
     const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
-    if (!popup) {
-      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
-      return;
-    }
     try {
       const blob = await apiBlob(`/expense-receipts/${receipt.id}/file`);
       const url = URL.createObjectURL(blob);
-      popup.location.href = url;
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (popup) {
+        popup.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = receipt.originalFileName ?? 'receipt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
     } catch (e: any) {
-      popup.close();
+      popup?.close();
       toast.error(e.message ?? 'เปิดไฟล์ไม่สำเร็จ');
     }
   }

@@ -28,7 +28,7 @@ export class UsersController {
     getMetadata: (req) => ({ role: req.body?.role, email: req.body?.email }),
   })
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateUserDto) {
-    return this.users.create(user.companyId, dto);
+    return this.users.create(user.companyId, user.role, dto);
   }
 
   @Patch(':id')
@@ -47,6 +47,6 @@ export class UsersController {
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
   ) {
-    return this.users.update(user.companyId, id, user.id, dto);
+    return this.users.update(user.companyId, id, user.id, user.role, dto);
   }
 }

@@ -121,7 +121,7 @@ export default function UsersSettingsPage() {
       header: '',
       align: 'right',
       render: (u) =>
-        canManage && (
+        canManage && (role === 'OWNER' || u.role !== 'OWNER') && (
           <button
             onClick={() => setEditing(u)}
             className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3"
@@ -167,6 +167,7 @@ export default function UsersSettingsPage() {
 
       <CreateUserModal
         open={creating}
+        currentUserRole={role}
         onClose={() => setCreating(false)}
         onSaved={() => {
           setCreating(false);
@@ -189,10 +190,12 @@ export default function UsersSettingsPage() {
 
 function CreateUserModal({
   open,
+  currentUserRole,
   onClose,
   onSaved,
 }: {
   open: boolean;
+  currentUserRole?: Role;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -204,6 +207,7 @@ function CreateUserModal({
     initial: '',
     role: 'ADMIN' as Role,
   });
+  const allowedRoleOptions = currentUserRole === 'OWNER' ? ROLE_OPTIONS : ROLE_OPTIONS.filter((r) => r !== 'OWNER');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -292,7 +296,7 @@ function CreateUserModal({
             onChange={(e) => setForm((v) => ({ ...v, role: e.target.value as Role }))}
             className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
           >
-            {ROLE_OPTIONS.map((r) => (
+            {allowedRoleOptions.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABEL[r]} ({r})
               </option>

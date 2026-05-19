@@ -174,11 +174,11 @@ export default function BankPage() {
 
   return (
     <>
-      <AppTopbar title="Bank Reconciliation" />
+      <AppTopbar title="กระทบยอดบัญชีธนาคาร" />
       <div className="flex-1 px-7 pb-16 pt-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Bank Reconciliation</h1>
+            <h1 className="text-2xl font-bold tracking-tight">กระทบยอดบัญชีธนาคาร</h1>
             <p className="mt-1 text-[13px] text-text-mute">
               นำเข้ารายการธนาคาร — ระบบจับคู่กับ Payment อัตโนมัติ (เทียบยอด + วันที่ ±5 วัน)
             </p>

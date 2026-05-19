@@ -6,7 +6,7 @@ import type { VatStatus } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { api } from '@/lib/api';
-import { formatThaiDate } from '@/lib/format';
+import { formatThaiDate, localDateString } from '@/lib/format';
 import { getUser } from '@/lib/auth';
 
 interface VatRow {
@@ -133,7 +133,7 @@ export default function VatHistoryPage() {
 
 function NewStatusForm(props: { onCancel: () => void; onSaved: () => void }) {
   const [status, setStatus] = useState<VatStatus>('REGISTERED');
-  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [effectiveFrom, setEffectiveFrom] = useState(localDateString());
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

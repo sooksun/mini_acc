@@ -84,8 +84,15 @@ export function PartnerPicker({ type, value, onChange, placeholder, requireTaxId
           )}
           {!loading &&
             items.map((p) => {
-              const noTaxId = !p.taxId?.trim();
-              const blocked = requireTaxId && noTaxId;
+              const taxIdValue = p.taxId?.trim() ?? '';
+              const noTaxId = !taxIdValue;
+              const badFormat = !!taxIdValue && !/^\d{13}$/.test(taxIdValue);
+              const blocked = requireTaxId && (noTaxId || badFormat);
+              const blockReason = noTaxId
+                ? 'ลูกค้านี้ไม่มีเลขผู้เสียภาษี'
+                : badFormat
+                  ? 'เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก'
+                  : undefined;
               return (
                 <button
                   type="button"
@@ -102,14 +109,16 @@ export function PartnerPicker({ type, value, onChange, placeholder, requireTaxId
                       ? 'cursor-not-allowed opacity-50'
                       : 'hover:bg-surface-3'
                   } ${value?.id === p.id ? 'bg-surface-2' : ''}`}
-                  title={blocked ? 'ลูกค้านี้ไม่มีเลขผู้เสียภาษี' : undefined}
+                  title={blockReason}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{p.nameTh}</span>
                     {p.code && <span className="text-[11px] text-text-mute">{p.code}</span>}
                   </div>
-                  {p.taxId ? (
-                    <div className="font-mono text-[11px] text-text-mute">{p.taxId}</div>
+                  {taxIdValue ? (
+                    <div className={`font-mono text-[11px] ${badFormat ? 'text-bad' : 'text-text-mute'}`}>
+                      {p.taxId}{badFormat && ' — ไม่ใช่ 13 หลัก'}
+                    </div>
                   ) : requireTaxId ? (
                     <div className="text-[11px] text-bad">ไม่มีเลขผู้เสียภาษี</div>
                   ) : null}

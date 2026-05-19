@@ -9,7 +9,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
-import { formatThaiCurrency, formatThaiDateShort } from '@/lib/format';
+import { formatThaiCurrency, formatThaiDateShort, localDateString } from '@/lib/format';
 
 interface AssetRow {
   id: string;
@@ -298,7 +298,7 @@ function CreateAssetModal({
         code: '',
         name: '',
         category: '',
-        acquiredAt: new Date().toISOString().slice(0, 10),
+        acquiredAt: localDateString(),
         cost: '',
         salvageValue: '0',
         usefulLifeMonths: '60',
@@ -460,7 +460,7 @@ function DisposeAssetModal({
   useEffect(() => {
     if (asset) {
       setReason('');
-      setDisposedAt(new Date().toISOString().slice(0, 10));
+      setDisposedAt(localDateString());
     }
   }, [asset]);
 

@@ -10,7 +10,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
-import { formatThaiCurrency, formatThaiDateShort } from '@/lib/format';
+import { formatThaiCurrency, formatThaiDateShort, localDateString } from '@/lib/format';
 
 interface PartnerLite {
   id: string;
@@ -302,10 +302,9 @@ function CreatePaymentModal({
 
   useEffect(() => {
     if (open) {
-      const today = new Date().toISOString().slice(0, 10);
       setDirection('OUT');
       setPartner(null);
-      setPaymentDate(today);
+      setPaymentDate(localDateString());
       setAmount('');
       setWhtAmount('');
       setMethod('BANK_TRANSFER');

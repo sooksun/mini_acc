@@ -12,6 +12,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { ApiError, api, apiBlob } from '@/lib/api';
 import { getUser } from '@/lib/auth';
+import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { formatThaiCurrency, formatThaiDateTime } from '@/lib/format';
 
 interface ExtractedPayload {
@@ -548,21 +549,26 @@ function ReviewModal({
 
   async function viewFile() {
     if (!suggestion) return;
-    // Open popup synchronously inside the click handler so the browser's
-    // popup blocker treats it as user-initiated; navigate to the blob URL
-    // once the fetch resolves.
+    // window.open must be called synchronously within the click handler to avoid
+    // popup blockers. If it still gets blocked (null), fall back to download.
     const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
-    if (!popup) {
-      toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
-      return;
-    }
     try {
       const blob = await apiBlob(`/ai-inbox/${suggestion.id}/file`);
       const url = URL.createObjectURL(blob);
-      popup.location.href = url;
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      if (popup) {
+        popup.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = suggestion.payload.originalFileName ?? 'document';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
     } catch (e: any) {
-      popup.close();
+      popup?.close();
       toast.error(e.message ?? 'เปิดไฟล์ไม่สำเร็จ');
     }
   }
@@ -698,11 +704,9 @@ function ReviewModal({
               label="วันที่เอกสาร"
               confidence={suggestion.confidence ?? undefined}
               value={
-                <input
-                  type="date"
+                <ThaiDatePicker
                   value={form.documentDate ?? ''}
-                  onChange={(e) => setForm((v) => ({ ...v, documentDate: e.target.value }))}
-                  className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[13.5px] outline-none focus:border-brand"
+                  onChange={(iso) => setForm((v) => ({ ...v, documentDate: iso }))}
                 />
               }
             />
@@ -710,11 +714,9 @@ function ReviewModal({
               label="วันที่จ่าย"
               confidence={suggestion.confidence ?? undefined}
               value={
-                <input
-                  type="date"
+                <ThaiDatePicker
                   value={form.paidAt ?? ''}
-                  onChange={(e) => setForm((v) => ({ ...v, paidAt: e.target.value }))}
-                  className="w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[13.5px] outline-none focus:border-brand"
+                  onChange={(iso) => setForm((v) => ({ ...v, paidAt: iso }))}
                 />
               }
             />

@@ -47,7 +47,7 @@ const NAV: NavGroup[] = [
     defaultOpen: true,
     items: [
       { href: '/payments', label: 'รับ/จ่ายเงิน' },
-      { href: '/bank', label: 'Bank Reconciliation' },
+      { href: '/bank', label: 'กระทบยอดบัญชีธนาคาร' },
       { href: '/tax', label: 'ภาษี VAT/WHT' },
       { href: '/wht-certificates', label: 'หนังสือรับรอง 50 ทวิ' },
     ],
@@ -69,9 +69,9 @@ const NAV: NavGroup[] = [
     group: 'ปิดงวด & ตรวจสอบ',
     defaultOpen: false,
     items: [
-      { href: '/risks', label: 'Risk Center' },
+      { href: '/risks', label: 'ศูนย์ความเสี่ยง' },
       { href: '/closing', label: 'ปิดงวดบัญชี' },
-      { href: '/accountant-pack', label: 'Accountant Pack' },
+      { href: '/accountant-pack', label: 'แพ็กสำหรับนักบัญชี' },
     ],
   },
   {
@@ -82,7 +82,7 @@ const NAV: NavGroup[] = [
       { href: '/settings/company', label: 'ตั้งค่าบริษัท' },
       { href: '/settings/users', label: 'ผู้ใช้และสิทธิ์' },
       { href: '/settings/document-numbering', label: 'เลขเอกสาร' },
-      { href: '/settings/audit-log', label: 'Audit Log' },
+      { href: '/settings/audit-log', label: 'บันทึกการตรวจสอบ' },
     ],
   },
 ];

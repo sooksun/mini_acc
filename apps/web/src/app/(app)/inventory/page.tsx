@@ -10,7 +10,7 @@ import { StatCard } from '@/components/ui/StatCard';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
-import { formatThaiCurrency, formatThaiDateShort } from '@/lib/format';
+import { formatThaiCurrency, formatThaiDateShort, localDateString } from '@/lib/format';
 
 interface ProductLite {
   id: string;
@@ -285,7 +285,7 @@ function CreateMovementModal({
       setType('IN');
       setQuantity('');
       setUnitCost('');
-      setMovementDate(new Date().toISOString().slice(0, 10));
+      setMovementDate(localDateString());
       setNote('');
     }
   }, [open]);
