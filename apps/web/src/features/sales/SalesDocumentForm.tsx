@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AppTopbar } from '@/components/AppTopbar';
@@ -117,6 +117,7 @@ export function SalesDocumentForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [company, setCompany] = useState<CompanySnapshot | null>(null);
+  const isFirstItemsRender = useRef(true);
 
   useEffect(() => {
     if (!meta.requireCustomerTaxId) return;
@@ -140,6 +141,20 @@ export function SalesDocumentForm({
       .then((r) => setPreviewNumber(r.number))
       .catch(() => setPreviewNumber(null));
   }, [documentDate, meta.type, mode]);
+
+  // Auto-suggest WHT based on item types.
+  // Rules: SERVICE items → 3%, goods only → 0%.
+  // Only applies when the current rate is the "standard" 0% or 3% — custom rates are left alone.
+  // Skips the first render so existing documents keep their saved whtRate.
+  useEffect(() => {
+    if (isFirstItemsRender.current) {
+      isFirstItemsRender.current = false;
+      return;
+    }
+    const hasService = items.some((it) => it.productType === 'SERVICE');
+    const suggested = hasService ? 3 : 0;
+    setWhtRate((prev) => (prev === 0 || prev === 3 ? suggested : prev));
+  }, [items]);
 
   const totals = useMemo(() => computeTotals(items, vatRate, whtRate), [items, vatRate, whtRate]);
 
@@ -492,7 +507,7 @@ export function SalesDocumentForm({
                     className={`${inputCls} font-mono`}
                   />
                 </Field>
-                <Field label="WHT %">
+                <Field label={<span>WHT % <span className="text-[10px] font-normal text-text-mute">(อัตโนมัติ)</span></span>}>
                   <input
                     type="number"
                     step="0.01"
@@ -529,7 +544,7 @@ function Field({
   required,
   children,
 }: {
-  label: string;
+  label: React.ReactNode;
   required?: boolean;
   children: React.ReactNode;
 }) {
