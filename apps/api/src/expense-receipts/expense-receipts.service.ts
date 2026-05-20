@@ -15,6 +15,7 @@ import { isAbsolute, join } from 'path';
 import type { Role } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadExpenseReceiptDto } from './dto/upload-expense-receipt.dto';
+import { UpdateExpenseReceiptDto } from './dto/update-expense-receipt.dto';
 import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
@@ -269,6 +270,63 @@ export class ExpenseReceiptsService {
     });
     if (!receipt) throw new NotFoundException('Expense receipt not found');
     return this.toDto(receipt);
+  }
+
+  /**
+   * Edit the metadata of an uploaded receipt before it is accounted — vendor
+   * proposal, dates, category, note, and the amounts. Blocked once ACCOUNTED
+   * since that would desync the posted journal. Vendor linking stays in
+   * linkVendor/approveVendor; this only touches the proposed fields + amounts.
+   */
+  async update(companyId: string, id: string, dto: UpdateExpenseReceiptDto) {
+    const receipt = await this.loadEntity(companyId, id);
+    if (receipt.status === 'ACCOUNTED') {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'ALREADY_ACCOUNTED',
+        message: 'ใบเสร็จนี้ลงรายจ่ายแล้ว — แก้ไขไม่ได้ ต้องยกเลิกการลงบัญชีก่อน',
+      });
+    }
+
+    // Partial update: only fields the client actually sent (!== undefined) are
+    // touched. Sending an empty string clears the field (→ null / 0); omitting
+    // it leaves the stored value intact — so fields not shown in the edit form
+    // (e.g. note) and the strictly-validated vendorTaxId are never wiped.
+    const updated = await this.prisma.expenseReceipt.update({
+      where: { id },
+      data: {
+        proposedVendorName:
+          dto.vendorName !== undefined ? this.blankToNull(dto.vendorName) : undefined,
+        proposedVendorTaxId:
+          dto.vendorTaxId !== undefined ? this.blankToNull(dto.vendorTaxId) : undefined,
+        proposedVendorBranch:
+          dto.vendorBranch !== undefined ? this.blankToNull(dto.vendorBranch) : undefined,
+        proposedVendorAddress:
+          dto.vendorAddress !== undefined ? this.blankToNull(dto.vendorAddress) : undefined,
+        documentNumber:
+          dto.documentNumber !== undefined ? this.blankToNull(dto.documentNumber) : undefined,
+        documentDate:
+          dto.documentDate !== undefined
+            ? dto.documentDate
+              ? new Date(dto.documentDate)
+              : null
+            : undefined,
+        paidAt:
+          dto.paidAt !== undefined ? (dto.paidAt ? new Date(dto.paidAt) : null) : undefined,
+        category: dto.category !== undefined ? this.blankToNull(dto.category) : undefined,
+        note: dto.note !== undefined ? this.blankToNull(dto.note) : undefined,
+        subtotal: dto.subtotal !== undefined ? this.money(dto.subtotal) : undefined,
+        vatAmount: dto.vatAmount !== undefined ? this.money(dto.vatAmount) : undefined,
+        withholdingTaxAmount:
+          dto.withholdingTaxAmount !== undefined
+            ? this.money(dto.withholdingTaxAmount)
+            : undefined,
+        grandTotal: dto.grandTotal !== undefined ? this.money(dto.grandTotal) : undefined,
+      },
+      include: this.include(),
+    });
+
+    return this.toDto(updated);
   }
 
   /** Read entity (not DTO) — used internally where Decimal columns and FK fields are needed. */

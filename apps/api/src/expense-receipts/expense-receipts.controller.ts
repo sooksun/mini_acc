@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -20,6 +21,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuditAction } from '../audit-log/audit-log.decorator';
 import { ExpenseReceiptsService } from './expense-receipts.service';
 import { UploadExpenseReceiptDto } from './dto/upload-expense-receipt.dto';
+import { UpdateExpenseReceiptDto } from './dto/update-expense-receipt.dto';
 import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
@@ -136,6 +138,21 @@ export class ExpenseReceiptsController {
   })
   account(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.expenseReceipts.account(user.companyId, user.id, user.role, id);
+  }
+
+  @Patch(':id')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @AuditAction('UPDATE_EXPENSE_RECEIPT', {
+    entityType: 'ExpenseReceipt',
+    getEntityId: (req) => req.params['id'] as string,
+    getMetadata: (_req, res) => ({ status: res?.status, grandTotal: res?.grandTotal }),
+  })
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateExpenseReceiptDto,
+  ) {
+    return this.expenseReceipts.update(user.companyId, id, dto);
   }
 
   @Post(':id/reject')

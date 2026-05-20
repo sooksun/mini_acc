@@ -91,6 +91,7 @@ export function ExpenseReceiptsPage() {
   const [includeAccounted, setIncludeAccounted] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [linking, setLinking] = useState<ExpenseReceipt | null>(null);
+  const [editing, setEditing] = useState<ExpenseReceipt | null>(null);
 
   const role = getUser()?.role;
   const canUpload = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
@@ -288,6 +289,7 @@ export function ExpenseReceiptsPage() {
                         onLink={() => setLinking(item)}
                         onAccount={() => accountReceipt(item)}
                         onView={() => viewFile(item)}
+                        onEdit={() => setEditing(item)}
                       />
                     </td>
                   </tr>
@@ -313,6 +315,15 @@ export function ExpenseReceiptsPage() {
         onClose={() => setLinking(null)}
         onSaved={() => {
           setLinking(null);
+          load();
+        }}
+      />
+
+      <EditReceiptModal
+        receipt={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => {
+          setEditing(null);
           load();
         }}
       />
@@ -348,6 +359,7 @@ function RowActions({
   onLink,
   onAccount,
   onView,
+  onEdit,
 }: {
   item: ExpenseReceipt;
   canApproveVendor: boolean;
@@ -357,6 +369,7 @@ function RowActions({
   onLink: () => void;
   onAccount: () => void;
   onView: () => void;
+  onEdit: () => void;
 }) {
   // Mirror server-side guards (H4) so the user sees the failure reason before
   // hitting the API and getting a 422 in a toast.
@@ -367,6 +380,8 @@ function RowActions({
   const showApproveNew =
     canApproveVendor && item.status === 'PENDING_VENDOR_APPROVAL' && !!item.proposedVendorName;
   const showAccount = canAccount && item.status === 'READY_TO_ACCOUNT';
+  const showEdit =
+    canUpload && item.status !== 'ACCOUNTED' && item.status !== 'REJECTED';
 
   return (
     <div className="flex justify-end gap-2">
@@ -377,6 +392,15 @@ function RowActions({
       >
         ดูไฟล์
       </button>
+      {showEdit && (
+        <button
+          onClick={onEdit}
+          title="แก้ไขข้อมูล/ยอดเงินของใบเสร็จ"
+          className="rounded-md border border-brand/40 bg-brand/5 px-2.5 py-1 text-[12px] font-medium text-brand hover:bg-brand/10"
+        >
+          แก้ไข
+        </button>
+      )}
       {showApproveNew && (
         <button
           onClick={onApproveNewVendor}
@@ -782,6 +806,144 @@ function LinkVendorModal({
           </div>
         )}
       </div>
+    </Modal>
+  );
+}
+
+function EditReceiptModal({
+  receipt,
+  onClose,
+  onSaved,
+}: {
+  receipt: ExpenseReceipt | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [form, setForm] = useState(EMPTY_UPLOAD);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!receipt) return;
+    setForm({
+      vendorName: receipt.proposedVendorName ?? receipt.vendor?.nameTh ?? '',
+      vendorTaxId: receipt.proposedVendorTaxId ?? receipt.vendor?.taxId ?? '',
+      vendorBranch: receipt.proposedVendorBranch ?? receipt.vendor?.branch ?? '',
+      vendorAddress: receipt.proposedVendorAddress ?? receipt.vendor?.address ?? '',
+      documentNumber: receipt.documentNumber ?? '',
+      documentDate: receipt.documentDate ? receipt.documentDate.slice(0, 10) : '',
+      paidAt: receipt.paidAt ? receipt.paidAt.slice(0, 10) : '',
+      category: receipt.category ?? '',
+      subtotal: receipt.subtotal ?? '',
+      vatAmount: receipt.vatAmount ?? '',
+      withholdingTaxAmount: receipt.withholdingTaxAmount ?? '',
+      grandTotal: receipt.grandTotal ?? '',
+      note: '',
+    });
+  }, [receipt]);
+
+  // Live reconcile preview so the operator fixes mismatches before saving —
+  // the account step requires subtotal + VAT − WHT === grandTotal exactly.
+  const reconcile = useMemo(() => {
+    const s = Number(form.subtotal || 0);
+    const v = Number(form.vatAmount || 0);
+    const w = Number(form.withholdingTaxAmount || 0);
+    const g = Number(form.grandTotal || 0);
+    if (![s, v, w, g].every(Number.isFinite)) return null;
+    const expected = Math.round((s + v - w) * 100) / 100;
+    return { ok: Math.abs(expected - g) < 0.005, expected, grand: g };
+  }, [form.subtotal, form.vatAmount, form.withholdingTaxAmount, form.grandTotal]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!receipt) return;
+    setSaving(true);
+    try {
+      // Send all fields shown (incl. empty → clears server-side), except:
+      // - note: not edited here, omit so it isn't wiped
+      // - vendorTaxId: only when filled (server validates strict 13 digits)
+      const payload: Record<string, string> = {};
+      Object.entries(form).forEach(([key, value]) => {
+        if (key === 'note') return;
+        if (key === 'vendorTaxId') {
+          if (value.trim()) payload[key] = value;
+          return;
+        }
+        payload[key] = value;
+      });
+      await api(`/expense-receipts/${receipt.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      toast.success('แก้ไขใบเสร็จแล้ว');
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={!!receipt}
+      onClose={() => {
+        if (!saving) onClose();
+      }}
+      title="แก้ไขรายการใบเสร็จ"
+      size="xl"
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-md border border-border px-4 py-2 text-[13px] disabled:opacity-50"
+          >
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            form="edit-expense-receipt-form"
+            disabled={saving}
+            className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+          >
+            {saving ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}
+          </button>
+        </>
+      }
+    >
+      <form id="edit-expense-receipt-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
+        <Field label="ชื่อผู้ขาย" value={form.vendorName} onChange={(vendorName) => setForm((v) => ({ ...v, vendorName }))} />
+        <Field label="เลขผู้เสียภาษีผู้ขาย" value={form.vendorTaxId} onChange={(vendorTaxId) => setForm((v) => ({ ...v, vendorTaxId }))} />
+        <Field label="สาขา" value={form.vendorBranch} onChange={(vendorBranch) => setForm((v) => ({ ...v, vendorBranch }))} />
+        <Field label="เลขที่เอกสาร" value={form.documentNumber} onChange={(documentNumber) => setForm((v) => ({ ...v, documentNumber }))} />
+        <Field type="date" label="วันที่เอกสาร" value={form.documentDate} onChange={(documentDate) => setForm((v) => ({ ...v, documentDate }))} />
+        <Field type="date" label="วันที่จ่าย" value={form.paidAt} onChange={(paidAt) => setForm((v) => ({ ...v, paidAt }))} />
+        <Field label="หมวดรายจ่าย" value={form.category} onChange={(category) => setForm((v) => ({ ...v, category }))} placeholder="เช่น ค่าซอฟต์แวร์ / ค่าเดินทาง" />
+        <Field label="ยอดก่อน VAT" value={form.subtotal} onChange={(subtotal) => setForm((v) => ({ ...v, subtotal }))} />
+        <Field label="VAT" value={form.vatAmount} onChange={(vatAmount) => setForm((v) => ({ ...v, vatAmount }))} />
+        <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
+        <Field label="ยอดสุทธิ" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} />
+        <label className="md:col-span-2">
+          <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย</span>
+          <textarea
+            value={form.vendorAddress}
+            onChange={(e) => setForm((v) => ({ ...v, vendorAddress: e.target.value }))}
+            className="min-h-20 w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+          />
+        </label>
+        {reconcile && !reconcile.ok && (
+          <div className="md:col-span-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-[12px] text-warn">
+            ยอดยังไม่สอดคล้อง: ยอดก่อน VAT + VAT − หัก ณ ที่จ่าย = {reconcile.expected.toFixed(2)} แต่ยอดสุทธิ = {reconcile.grand.toFixed(2)} — ปรับให้ตรงก่อนจึงจะลงรายจ่ายได้
+          </div>
+        )}
+        {reconcile && reconcile.ok && (
+          <div className="md:col-span-2 rounded-md border border-ok/40 bg-ok/5 px-3 py-2 text-[12px] text-ok">
+            ยอดสอดคล้องกัน ✓ ({reconcile.grand.toFixed(2)})
+          </div>
+        )}
+      </form>
     </Modal>
   );
 }
