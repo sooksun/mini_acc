@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { DocumentStatus } from '@hj/shared-types';
+import type { DocumentStatus, DocumentType } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { Spinner } from '@/components/ui/Spinner';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -12,7 +13,7 @@ import { useToast } from '@/components/ui/Toast';
 import { api, apiBlob } from '@/lib/api';
 import { formatThaiDate, formatThaiDateTime, numberToThaiBahtText } from '@/lib/format';
 import { getUser } from '@/lib/auth';
-import type { DocTypeMeta } from './doc-type-meta';
+import { DOC_TYPE_META, type DocTypeMeta } from './doc-type-meta';
 
 interface Item {
   id: string;
@@ -26,8 +27,16 @@ interface Item {
   vatable: boolean;
 }
 
+interface ChainRef {
+  id: string;
+  type: DocumentType;
+  number: string;
+  status: DocumentStatus;
+}
+
 interface SalesDoc {
   id: string;
+  type: DocumentType;
   number: string;
   status: DocumentStatus;
   documentDate: string;
@@ -53,6 +62,8 @@ interface SalesDoc {
   voidedAt: string | null;
   voidReason: string | null;
   pdfPath: string | null;
+  parentDocument: ChainRef | null;
+  childDocuments: ChainRef[];
   createdAt: string;
   updatedAt: string;
 }
@@ -65,6 +76,7 @@ export function SalesDocumentDetail({
   id: string;
 }) {
   const toast = useToast();
+  const router = useRouter();
   const [doc, setDoc] = useState<SalesDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +94,21 @@ export function SalesDocumentDetail({
     doc &&
     doc.status !== 'DRAFT' &&
     doc.status !== 'VOIDED' &&
+    (role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT');
+  // Chain: a confirmed (or later) document with no active child yet can spawn
+  // the next document in the QT → DN → INV → (RT|RC) chain.
+  const canCreateNext =
+    !!doc &&
+    !!meta.nextLabel &&
+    ['USER_CONFIRMED', 'ACCOUNTED', 'ACCOUNTANT_APPROVED', 'LOCKED'].includes(doc.status) &&
+    doc.childDocuments.length === 0 &&
+    (role === 'OWNER' || role === 'ADMIN');
+  // "ลงบัญชี": receipts that are confirmed can be marked ACCOUNTED once the
+  // money has cleared the bank.
+  const canAccount =
+    !!doc &&
+    !!meta.canAccount &&
+    doc.status === 'USER_CONFIRMED' &&
     (role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT');
 
   async function load() {
@@ -110,6 +137,34 @@ export function SalesDocumentDetail({
       toast.error(e.message);
     } finally {
       setConfirmOpen(false);
+    }
+  }
+
+  async function handleCreateNext() {
+    try {
+      const child = await api<{ id: string; type: DocumentType }>(
+        `${meta.apiBase}/${id}/create-next`,
+        { method: 'POST' },
+      );
+      toast.success('สร้างเอกสารถัดไปแล้ว (ฉบับร่าง)');
+      const childMeta = DOC_TYPE_META[child.type as keyof typeof DOC_TYPE_META];
+      if (childMeta) {
+        router.push(`${childMeta.listHref}/${child.id}` as any);
+      } else {
+        load();
+      }
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
+
+  async function handleAccount() {
+    try {
+      await api(`${meta.apiBase}/${id}/account`, { method: 'POST' });
+      toast.success('บันทึกลงบัญชีแล้ว');
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
     }
   }
 
@@ -285,6 +340,22 @@ export function SalesDocumentDetail({
                 ยืนยัน → ออกเลขจริง
               </button>
             )}
+            {canCreateNext && (
+              <button
+                onClick={handleCreateNext}
+                className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+              >
+                {meta.nextLabel}
+              </button>
+            )}
+            {canAccount && (
+              <button
+                onClick={handleAccount}
+                className="rounded-md border border-ok/40 bg-ok/5 px-4 py-2 text-[13px] font-medium text-ok hover:bg-ok/10"
+              >
+                ลงบัญชี
+              </button>
+            )}
             {canVoid && (
               <button
                 onClick={() => setVoidOpen(true)}
@@ -299,6 +370,16 @@ export function SalesDocumentDetail({
         {doc.voidReason && (
           <div className="mt-4 rounded-md border border-bad/40 bg-bad/5 px-4 py-2.5 text-sm text-bad">
             <b>เหตุผลยกเลิก:</b> {doc.voidReason}
+          </div>
+        )}
+
+        {(doc.parentDocument || doc.childDocuments.length > 0) && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px]">
+            <span className="text-text-mute">สายเอกสาร:</span>
+            {doc.parentDocument && <ChainLink doc={doc.parentDocument} direction="prev" />}
+            {doc.childDocuments.map((c) => (
+              <ChainLink key={c.id} doc={c} direction="next" />
+            ))}
           </div>
         )}
 
@@ -412,6 +493,23 @@ export function SalesDocumentDetail({
         onClose={() => setVoidOpen(false)}
       />
     </>
+  );
+}
+
+function ChainLink({ doc, direction }: { doc: ChainRef; direction: 'prev' | 'next' }) {
+  const m = DOC_TYPE_META[doc.type as keyof typeof DOC_TYPE_META];
+  if (!m) return null;
+  return (
+    <Link
+      href={`${m.listHref}/${doc.id}` as any}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2.5 py-1 text-text-soft hover:border-brand hover:text-text"
+    >
+      {direction === 'prev' && <span>←</span>}
+      <span>{m.shortTitle}</span>
+      <span className="font-mono text-text-mute">{doc.number}</span>
+      <StatusBadge status={doc.status} />
+      {direction === 'next' && <span>→</span>}
+    </Link>
   );
 }
 

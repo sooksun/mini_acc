@@ -59,6 +59,18 @@ export class ReceiptsController {
     return this.receipts.confirm(user.companyId, user.id, user.role, id);
   }
 
+  @Post(':id/account')
+  @HttpCode(200)
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @AuditAction('ACCOUNT_DOCUMENT', {
+    entityType: ENTITY,
+    getEntityId: (req) => req.params['id'] as string,
+    getMetadata: (_req, res) => ({ number: res?.number }),
+  })
+  account(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.receipts.account(user.companyId, user.id, user.role, id);
+  }
+
   @Post(':id/void')
   @HttpCode(200)
   @Roles('OWNER', 'ACCOUNTANT')

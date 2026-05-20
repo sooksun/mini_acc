@@ -16,6 +16,10 @@ export class ReceiptsService {
     return this.salesDoc.confirm('RECEIPT', companyId, userId, role, id);
   }
 
+  account(companyId: string, userId: string, role: Role, id: string) {
+    return this.salesDoc.account('RECEIPT', companyId, userId, role, id);
+  }
+
   void(companyId: string, userId: string, role: Role, id: string, reason: string) {
     return this.salesDoc.void('RECEIPT', companyId, userId, role, id, reason);
   }

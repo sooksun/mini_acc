@@ -10,6 +10,10 @@ export interface DocTypeMeta {
   pdfBase: string;
   requireCustomerTaxId: boolean;
   prefix: string;
+  /** Label for the "create next document in chain" button. Undefined = end of chain. */
+  nextLabel?: string;
+  /** Whether this doc type can be marked ACCOUNTED ("ลงบัญชี" — เงินเข้าบัญชีแล้ว). */
+  canAccount?: boolean;
 }
 
 export const DOC_TYPE_META: Record<
@@ -31,6 +35,7 @@ export const DOC_TYPE_META: Record<
     pdfBase: '/sales-pdf/quotations',
     requireCustomerTaxId: false,
     prefix: 'QT',
+    nextLabel: 'สร้างใบส่งของ →',
   },
   INVOICE: {
     type: 'INVOICE',
@@ -42,6 +47,7 @@ export const DOC_TYPE_META: Record<
     pdfBase: '/sales-pdf/invoices',
     requireCustomerTaxId: false,
     prefix: 'INV',
+    nextLabel: 'ออกใบเสร็จ/ใบกำกับภาษี →',
   },
   DELIVERY_NOTE: {
     type: 'DELIVERY_NOTE',
@@ -53,6 +59,7 @@ export const DOC_TYPE_META: Record<
     pdfBase: '/sales-pdf/delivery-notes',
     requireCustomerTaxId: false,
     prefix: 'DN',
+    nextLabel: 'สร้างใบแจ้งหนี้ →',
   },
   RECEIPT: {
     type: 'RECEIPT',
@@ -64,6 +71,7 @@ export const DOC_TYPE_META: Record<
     pdfBase: '/sales-pdf/receipts',
     requireCustomerTaxId: false,
     prefix: 'RC',
+    canAccount: true,
   },
   TAX_INVOICE: {
     type: 'TAX_INVOICE',
@@ -86,5 +94,6 @@ export const DOC_TYPE_META: Record<
     pdfBase: '/sales-pdf/receipt-tax-invoices',
     requireCustomerTaxId: true,
     prefix: 'RT',
+    canAccount: true,
   },
 };

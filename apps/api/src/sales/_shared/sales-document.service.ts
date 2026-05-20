@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma, SalesDocument, SalesDocumentItem } from '@prisma/client';
-import type { DocumentType, Role } from '@hj/shared-types';
+import type { DocumentStatus, DocumentType, Role } from '@hj/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NumberingService } from '../../numbering/numbering.service';
 import { getBuddhistYear } from '../../numbering/be-year';
@@ -272,6 +272,174 @@ export class SalesDocumentService {
     });
   }
 
+  /**
+   * Resolve the next document type in the QT → DN → INV → (RT|RC) chain.
+   * INVOICE branches to RECEIPT_TAX_INVOICE when the customer has a valid
+   * 13-digit tax id, otherwise to a plain RECEIPT. Returns null for the
+   * end-of-chain types (RECEIPT / RECEIPT_TAX_INVOICE) and any non-chain type.
+   */
+  private resolveNextType(
+    type: DocumentType,
+    customerHasTaxId: boolean,
+  ): DocumentType | null {
+    switch (type) {
+      case 'QUOTATION':
+        return 'DELIVERY_NOTE';
+      case 'DELIVERY_NOTE':
+        return 'INVOICE';
+      case 'INVOICE':
+        return customerHasTaxId ? 'RECEIPT_TAX_INVOICE' : 'RECEIPT';
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Manually create the next document in the chain from a confirmed source
+   * document. The new document is a DRAFT that copies the customer + items +
+   * VAT/WHT rates and links back via parentDocumentId. One source can spawn at
+   * most one (non-voided) child to avoid duplicates.
+   */
+  async createNext(
+    type: DocumentType,
+    companyId: string,
+    userId: string,
+    id: string,
+  ) {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const source = await tx.salesDocument.findFirst({
+        where: { id, companyId, type },
+        include: { items: { orderBy: { lineNumber: 'asc' } } },
+      });
+      if (!source) throw new NotFoundException('Document not found');
+
+      if (source.status === 'DRAFT' || source.status === 'VOIDED') {
+        throw new UnprocessableEntityException({
+          code: 'SOURCE_NOT_CONFIRMED',
+          message: 'ต้องยืนยันเอกสารต้นทางก่อน จึงจะสร้างเอกสารถัดไปได้',
+        });
+      }
+
+      const customer = await tx.partner.findFirst({
+        where: { id: source.customerId, companyId },
+      });
+      if (!customer) throw new NotFoundException('Customer not found');
+
+      const customerHasTaxId = /^\d{13}$/.test(customer.taxId?.trim() ?? '');
+      const nextType = this.resolveNextType(type, customerHasTaxId);
+      if (!nextType) {
+        throw new UnprocessableEntityException({
+          code: 'NO_NEXT_DOCUMENT',
+          message: 'เอกสารประเภทนี้เป็นปลายทางของสายเอกสารแล้ว',
+        });
+      }
+
+      const existingChild = await tx.salesDocument.findFirst({
+        where: { parentDocumentId: id, companyId, status: { not: 'VOIDED' } },
+        select: { id: true, number: true },
+      });
+      if (existingChild) {
+        throw new UnprocessableEntityException({
+          code: 'NEXT_ALREADY_EXISTS',
+          message: `สร้างเอกสารถัดไปจากเอกสารนี้ไปแล้ว (${existingChild.number})`,
+          childId: existingChild.id,
+        });
+      }
+
+      const itemInputs: SalesDocumentItemInput[] = source.items.map((it) => ({
+        productId: it.productId ?? undefined,
+        productCode: it.productCode ?? undefined,
+        description: it.description,
+        unit: it.unit,
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unitPrice),
+        discount: Number(it.discount),
+        vatable: it.vatable,
+      }));
+      const totals = computeTotals(
+        itemInputs,
+        Number(source.vatRate),
+        Number(source.whtRate),
+      );
+      const documentDate = new Date();
+      const beYear = getBuddhistYear(documentDate);
+      const placeholder = `DRAFT-${randomUUID().slice(0, 8).toUpperCase()}`;
+
+      const child = await tx.salesDocument.create({
+        data: {
+          companyId,
+          type: nextType,
+          number: placeholder,
+          beYear,
+          status: 'DRAFT',
+          customerId: customer.id,
+          parentDocumentId: source.id,
+          documentDate,
+          reference: source.number,
+          customerSnapshotName: customer.nameTh,
+          customerSnapshotAddress: customer.address,
+          customerSnapshotTaxId: customer.taxId,
+          customerSnapshotBranch: customer.branch,
+          subtotal: totals.subtotal,
+          vatRate: totals.vatRate,
+          vatAmount: totals.vatAmount,
+          totalAfterVat: totals.totalAfterVat,
+          whtRate: totals.whtRate,
+          whtAmount: totals.whtAmount,
+          grandTotal: totals.grandTotal,
+          netReceived: totals.netReceived,
+          createdBy: userId,
+          items: {
+            create: itemInputs.map((item, idx) => ({
+              productId: item.productId ?? null,
+              lineNumber: idx + 1,
+              productCode: item.productCode ?? null,
+              description: item.description,
+              unit: item.unit,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              discount: item.discount ?? 0,
+              lineTotal: lineTotal(item),
+              vatable: item.vatable ?? true,
+            })),
+          },
+        },
+        include: { items: { orderBy: { lineNumber: 'asc' } } },
+      });
+
+      return this.toDto(child);
+    });
+  }
+
+  /**
+   * Mark a confirmed document as ACCOUNTED ("ลงบัญชี"). Used for receipts once
+   * the money has cleared the bank. Goes through the lifecycle state machine.
+   */
+  async account(
+    type: DocumentType,
+    companyId: string,
+    userId: string,
+    role: Role,
+    id: string,
+  ) {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const doc = await tx.salesDocument.findFirst({
+        where: { id, companyId, type },
+      });
+      if (!doc) throw new NotFoundException('Document not found');
+
+      validateTransition({ from: doc.status, to: 'ACCOUNTED', role });
+
+      const updated = await tx.salesDocument.update({
+        where: { id },
+        data: { status: 'ACCOUNTED' },
+        include: { items: { orderBy: { lineNumber: 'asc' } } },
+      });
+
+      return this.toDto(updated);
+    });
+  }
+
   async void(
     type: DocumentType,
     companyId: string,
@@ -306,7 +474,15 @@ export class SalesDocumentService {
   async findOne(type: DocumentType, companyId: string, id: string) {
     const doc = await this.prisma.salesDocument.findFirst({
       where: { id, companyId, type },
-      include: { items: { orderBy: { lineNumber: 'asc' } } },
+      include: {
+        items: { orderBy: { lineNumber: 'asc' } },
+        parentDocument: { select: { id: true, type: true, number: true, status: true } },
+        childDocuments: {
+          where: { status: { not: 'VOIDED' } },
+          select: { id: true, type: true, number: true, status: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
     if (!doc) throw new NotFoundException('Document not found');
     return this.toDto(doc);
@@ -396,7 +572,23 @@ export class SalesDocumentService {
     }
   }
 
-  toDto(doc: SalesDocument & { items: SalesDocumentItem[] }) {
+  toDto(
+    doc: SalesDocument & {
+      items: SalesDocumentItem[];
+      parentDocument?: {
+        id: string;
+        type: DocumentType;
+        number: string;
+        status: DocumentStatus;
+      } | null;
+      childDocuments?: Array<{
+        id: string;
+        type: DocumentType;
+        number: string;
+        status: DocumentStatus;
+      }>;
+    },
+  ) {
     return {
       id: doc.id,
       type: doc.type,
@@ -406,6 +598,20 @@ export class SalesDocumentService {
       customerId: doc.customerId,
       projectId: doc.projectId,
       parentDocumentId: doc.parentDocumentId,
+      parentDocument: doc.parentDocument
+        ? {
+            id: doc.parentDocument.id,
+            type: doc.parentDocument.type,
+            number: doc.parentDocument.number,
+            status: doc.parentDocument.status,
+          }
+        : null,
+      childDocuments: (doc.childDocuments ?? []).map((c) => ({
+        id: c.id,
+        type: c.type,
+        number: c.number,
+        status: c.status,
+      })),
       documentDate: doc.documentDate.toISOString(),
       dueDate: doc.dueDate ? doc.dueDate.toISOString() : null,
       reference: doc.reference,

@@ -41,6 +41,10 @@ export class ReceiptTaxInvoicesService {
     return this.salesDoc.confirm('RECEIPT_TAX_INVOICE', companyId, userId, role, id);
   }
 
+  account(companyId: string, userId: string, role: Role, id: string) {
+    return this.salesDoc.account('RECEIPT_TAX_INVOICE', companyId, userId, role, id);
+  }
+
   void(companyId: string, userId: string, role: Role, id: string, reason: string) {
     return this.salesDoc.void('RECEIPT_TAX_INVOICE', companyId, userId, role, id, reason);
   }

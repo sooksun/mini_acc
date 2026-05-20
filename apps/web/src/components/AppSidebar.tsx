@@ -25,11 +25,9 @@ const NAV: NavGroup[] = [
     defaultOpen: true,
     items: [
       { href: '/sales/quotations', label: 'ใบเสนอราคา' },
-      { href: '/sales/invoices', label: 'ใบแจ้งหนี้' },
       { href: '/sales/delivery-notes', label: 'ใบส่งของ' },
-      { href: '/sales/receipts', label: 'ใบเสร็จ' },
-      { href: '/sales/tax-invoices', label: 'ใบกำกับภาษี' },
-      { href: '/sales/receipt-tax-invoices', label: 'ใบเสร็จ/ภาษี' },
+      { href: '/sales/invoices', label: 'ใบแจ้งหนี้' },
+      { href: '/sales/receipt-tax-invoices', label: 'ใบเสร็จ/ใบกำกับภาษี' },
     ],
   },
   {
