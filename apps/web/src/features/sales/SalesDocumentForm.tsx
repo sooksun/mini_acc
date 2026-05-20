@@ -392,7 +392,7 @@ export function SalesDocumentForm({
                   + เพิ่มแถว
                 </button>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto lg:overflow-x-visible">
                 <table className="w-full min-w-[800px] text-[13px]">
                   <thead>
                     <tr className="border-b border-border bg-surface-2 text-left text-text-soft">
