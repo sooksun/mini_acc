@@ -312,7 +312,7 @@ export function SalesDocumentForm({
           </div>
         )}
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_320px]">
+        <div className="mt-6 space-y-4">
           <div className="space-y-4">
             <div className="rounded-lg border border-border bg-surface p-5 shadow-sm">
               <h3 className="mb-3 text-[13px] font-semibold text-text-soft">ข้อมูลเอกสาร</h3>
@@ -504,8 +504,8 @@ export function SalesDocumentForm({
             </div>
           </div>
 
-          <aside className="space-y-4">
-            <div className="rounded-lg border border-border bg-surface p-5 shadow-sm lg:sticky lg:top-20">
+          <div className="flex justify-end">
+            <div className="w-full rounded-lg border border-border bg-surface p-5 shadow-sm lg:max-w-[420px]">
               <h3 className="mb-3 text-[13px] font-semibold text-text-soft">สรุปยอด</h3>
               <div className="mb-3 grid grid-cols-2 gap-3">
                 <Field label="VAT %">
@@ -541,7 +541,7 @@ export function SalesDocumentForm({
                 ({numberToThaiBahtText(totals.netReceived)})
               </div>
             </div>
-          </aside>
+          </div>
         </div>
       </form>
     </>
