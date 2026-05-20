@@ -226,7 +226,7 @@ export function ProductPicker({
             {/* List */}
             <div
               ref={listRef}
-              className="max-h-[360px] overflow-y-auto"
+              className="max-h-[70vh] overflow-y-auto"
             >
               {loading && (
                 <div className="flex items-center justify-center py-8">
