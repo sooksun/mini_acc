@@ -16,10 +16,6 @@ export class InvoicesService {
     return this.salesDoc.confirm('INVOICE', companyId, userId, role, id);
   }
 
-  createNext(companyId: string, userId: string, id: string) {
-    return this.salesDoc.createNext('INVOICE', companyId, userId, id);
-  }
-
   void(companyId: string, userId: string, role: Role, id: string, reason: string) {
     return this.salesDoc.void('INVOICE', companyId, userId, role, id, reason);
   }

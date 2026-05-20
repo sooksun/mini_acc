@@ -16,10 +16,6 @@ export class DeliveryNotesService {
     return this.salesDoc.confirm('DELIVERY_NOTE', companyId, userId, role, id);
   }
 
-  createNext(companyId: string, userId: string, id: string) {
-    return this.salesDoc.createNext('DELIVERY_NOTE', companyId, userId, id);
-  }
-
   void(companyId: string, userId: string, role: Role, id: string, reason: string) {
     return this.salesDoc.void('DELIVERY_NOTE', companyId, userId, role, id, reason);
   }

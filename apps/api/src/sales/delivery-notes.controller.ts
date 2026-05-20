@@ -59,18 +59,6 @@ export class DeliveryNotesController {
     return this.deliveryNotes.confirm(user.companyId, user.id, user.role, id);
   }
 
-  @Post(':id/create-next')
-  @HttpCode(200)
-  @Roles('OWNER', 'ADMIN')
-  @AuditAction('CREATE_DOCUMENT', {
-    entityType: ENTITY,
-    getEntityId: (_req, res) => res?.id,
-    getMetadata: (req, res) => ({ type: res?.type, number: res?.number, fromId: req.params['id'] }),
-  })
-  createNext(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.deliveryNotes.createNext(user.companyId, user.id, id);
-  }
-
   @Post(':id/void')
   @HttpCode(200)
   @Roles('OWNER', 'ACCOUNTANT')

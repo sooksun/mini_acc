@@ -268,6 +268,10 @@ export class SalesDocumentService {
         });
       }
 
+      // Materialise the rest of the chain (DN/INV/RT|RC) as DRAFTs so the
+      // operator can confirm each one as the real-world event happens.
+      await this.createDownstreamDrafts(tx, updated, companyId, userId);
+
       return this.toDto(updated);
     });
   }
@@ -295,76 +299,68 @@ export class SalesDocumentService {
   }
 
   /**
-   * Manually create the next document in the chain from a confirmed source
-   * document. The new document is a DRAFT that copies the customer + items +
-   * VAT/WHT rates and links back via parentDocumentId. One source can spawn at
-   * most one (non-voided) child to avoid duplicates.
+   * After a document is confirmed, materialise the remaining downstream chain
+   * (QT → DN → INV → RT|RC) as DRAFTs in one shot. Idempotent: any leg that
+   * already has a non-voided child is skipped, so confirming a later document
+   * only fills the gaps. INVOICE branches to RECEIPT_TAX_INVOICE when the
+   * customer has a 13-digit tax id, otherwise a plain RECEIPT. All drafts copy
+   * the confirmed source's customer snapshot + items + VAT/WHT rates and link
+   * together via parentDocumentId.
    */
-  async createNext(
-    type: DocumentType,
+  private async createDownstreamDrafts(
+    tx: Prisma.TransactionClient,
+    source: SalesDocument & { items: SalesDocumentItem[] },
     companyId: string,
     userId: string,
-    id: string,
   ) {
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const source = await tx.salesDocument.findFirst({
-        where: { id, companyId, type },
-        include: { items: { orderBy: { lineNumber: 'asc' } } },
-      });
-      if (!source) throw new NotFoundException('Document not found');
+    const customer = await tx.partner.findFirst({
+      where: { id: source.customerId, companyId },
+    });
+    if (!customer) return;
+    const customerHasTaxId = /^\d{13}$/.test(customer.taxId?.trim() ?? '');
 
-      if (source.status === 'DRAFT' || source.status === 'VOIDED') {
-        throw new UnprocessableEntityException({
-          code: 'SOURCE_NOT_CONFIRMED',
-          message: 'ต้องยืนยันเอกสารต้นทางก่อน จึงจะสร้างเอกสารถัดไปได้',
-        });
+    const itemInputs: SalesDocumentItemInput[] = source.items.map((it) => ({
+      productId: it.productId ?? undefined,
+      productCode: it.productCode ?? undefined,
+      description: it.description,
+      unit: it.unit,
+      quantity: Number(it.quantity),
+      unitPrice: Number(it.unitPrice),
+      discount: Number(it.discount),
+      vatable: it.vatable,
+    }));
+    const totals = computeTotals(
+      itemInputs,
+      Number(source.vatRate),
+      Number(source.whtRate),
+    );
+    const documentDate = new Date();
+    const beYear = getBuddhistYear(documentDate);
+
+    let parentId = source.id;
+    let currentType: DocumentType = source.type;
+
+    // Defensive bound — the chain is at most 3 legs (DN → INV → RT|RC).
+    for (let i = 0; i < 5; i++) {
+      const nextType = this.resolveNextType(currentType, customerHasTaxId);
+      if (!nextType) break;
+
+      const existing = await tx.salesDocument.findFirst({
+        where: {
+          parentDocumentId: parentId,
+          type: nextType,
+          companyId,
+          status: { not: 'VOIDED' },
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        parentId = existing.id;
+        currentType = nextType;
+        continue;
       }
 
-      const customer = await tx.partner.findFirst({
-        where: { id: source.customerId, companyId },
-      });
-      if (!customer) throw new NotFoundException('Customer not found');
-
-      const customerHasTaxId = /^\d{13}$/.test(customer.taxId?.trim() ?? '');
-      const nextType = this.resolveNextType(type, customerHasTaxId);
-      if (!nextType) {
-        throw new UnprocessableEntityException({
-          code: 'NO_NEXT_DOCUMENT',
-          message: 'เอกสารประเภทนี้เป็นปลายทางของสายเอกสารแล้ว',
-        });
-      }
-
-      const existingChild = await tx.salesDocument.findFirst({
-        where: { parentDocumentId: id, companyId, status: { not: 'VOIDED' } },
-        select: { id: true, number: true },
-      });
-      if (existingChild) {
-        throw new UnprocessableEntityException({
-          code: 'NEXT_ALREADY_EXISTS',
-          message: `สร้างเอกสารถัดไปจากเอกสารนี้ไปแล้ว (${existingChild.number})`,
-          childId: existingChild.id,
-        });
-      }
-
-      const itemInputs: SalesDocumentItemInput[] = source.items.map((it) => ({
-        productId: it.productId ?? undefined,
-        productCode: it.productCode ?? undefined,
-        description: it.description,
-        unit: it.unit,
-        quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPrice),
-        discount: Number(it.discount),
-        vatable: it.vatable,
-      }));
-      const totals = computeTotals(
-        itemInputs,
-        Number(source.vatRate),
-        Number(source.whtRate),
-      );
-      const documentDate = new Date();
-      const beYear = getBuddhistYear(documentDate);
       const placeholder = `DRAFT-${randomUUID().slice(0, 8).toUpperCase()}`;
-
       const child = await tx.salesDocument.create({
         data: {
           companyId,
@@ -373,7 +369,7 @@ export class SalesDocumentService {
           beYear,
           status: 'DRAFT',
           customerId: customer.id,
-          parentDocumentId: source.id,
+          parentDocumentId: parentId,
           documentDate,
           reference: source.number,
           customerSnapshotName: customer.nameTh,
@@ -404,11 +400,11 @@ export class SalesDocumentService {
             })),
           },
         },
-        include: { items: { orderBy: { lineNumber: 'asc' } } },
+        select: { id: true },
       });
-
-      return this.toDto(child);
-    });
+      parentId = child.id;
+      currentType = nextType;
+    }
   }
 
   /**

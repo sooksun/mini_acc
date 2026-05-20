@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { DocumentStatus, DocumentType } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
@@ -76,7 +75,6 @@ export function SalesDocumentDetail({
   id: string;
 }) {
   const toast = useToast();
-  const router = useRouter();
   const [doc, setDoc] = useState<SalesDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,14 +93,6 @@ export function SalesDocumentDetail({
     doc.status !== 'DRAFT' &&
     doc.status !== 'VOIDED' &&
     (role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT');
-  // Chain: a confirmed (or later) document with no active child yet can spawn
-  // the next document in the QT → DN → INV → (RT|RC) chain.
-  const canCreateNext =
-    !!doc &&
-    !!meta.nextLabel &&
-    ['USER_CONFIRMED', 'ACCOUNTED', 'ACCOUNTANT_APPROVED', 'LOCKED'].includes(doc.status) &&
-    doc.childDocuments.length === 0 &&
-    (role === 'OWNER' || role === 'ADMIN');
   // "ลงบัญชี": receipts that are confirmed can be marked ACCOUNTED once the
   // money has cleared the bank.
   const canAccount =
@@ -137,24 +127,6 @@ export function SalesDocumentDetail({
       toast.error(e.message);
     } finally {
       setConfirmOpen(false);
-    }
-  }
-
-  async function handleCreateNext() {
-    try {
-      const child = await api<{ id: string; type: DocumentType }>(
-        `${meta.apiBase}/${id}/create-next`,
-        { method: 'POST' },
-      );
-      toast.success('สร้างเอกสารถัดไปแล้ว (ฉบับร่าง)');
-      const childMeta = DOC_TYPE_META[child.type as keyof typeof DOC_TYPE_META];
-      if (childMeta) {
-        router.push(`${childMeta.listHref}/${child.id}` as any);
-      } else {
-        load();
-      }
-    } catch (e: any) {
-      toast.error(e.message);
     }
   }
 
@@ -338,14 +310,6 @@ export function SalesDocumentDetail({
                 className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
               >
                 ยืนยัน → ออกเลขจริง
-              </button>
-            )}
-            {canCreateNext && (
-              <button
-                onClick={handleCreateNext}
-                className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
-              >
-                {meta.nextLabel}
               </button>
             )}
             {canAccount && (

@@ -20,10 +20,6 @@ export class QuotationsService {
     return this.salesDoc.confirm('QUOTATION', companyId, userId, role, id);
   }
 
-  createNext(companyId: string, userId: string, id: string) {
-    return this.salesDoc.createNext('QUOTATION', companyId, userId, id);
-  }
-
   void(companyId: string, userId: string, role: Role, id: string, reason: string) {
     return this.salesDoc.void('QUOTATION', companyId, userId, role, id, reason);
   }
