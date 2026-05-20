@@ -146,6 +146,9 @@ export class ReportsService {
       where: {
         companyId,
         status: 'RECORDED',
+        // Capitalized (intangible) records are assets, not P&L expense — their
+        // cost reaches the P&L later via depreciation/amortization.
+        treatAsIntangible: false,
         expenseDate: { gte: range.start, lt: range.end },
       },
       select: {

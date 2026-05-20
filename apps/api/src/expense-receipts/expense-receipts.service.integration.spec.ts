@@ -784,4 +784,60 @@ describe('ExpenseReceiptsService (integration)', () => {
       expect(fallback?.rate).toBe('15');
     });
   });
+
+  describe('F4 — capitalize as intangible / billing-name guard', () => {
+    it('billedToName ≠ company name flags mismatch; matching name does not', async () => {
+      const mismatch = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        { billedToName: 'นายสุขสันต์ ส่วนตัว', subtotal: '100', grandTotal: '100' },
+        fakePdf('bill-mismatch.pdf', 'bill-mm-1'),
+      );
+      expect(mismatch.billingNameMismatch).toBe(true);
+
+      const match = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        { billedToName: 'หจก. ทดสอบ', subtotal: '100', grandTotal: '100' },
+        fakePdf('bill-match.pdf', 'bill-mt-1'),
+      );
+      expect(match.billingNameMismatch).toBe(false);
+    });
+
+    it('treatAsIntangible: account debits the intangible asset (not expense) and creates a FixedAsset', async () => {
+      const vendor = await makeVendor('Xlinesoft', '0000000062001');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '30000',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '30000',
+          paidAt: '2026-05-10',
+          category: 'PHPRunner Enterprise license',
+          treatAsIntangible: true,
+          intangibleUsefulLifeMonths: '36',
+        },
+        fakePdf('intangible.pdf', 'intangible-1'),
+      );
+      const accounted = await service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id);
+
+      const je = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'EXPENSE_RECORD', sourceId: accounted.expenseRecord!.id },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(je.lines[0]!.accountCode).toBe('1410'); // intangible asset, not 5000 expense
+      expect(je.lines[1]!.accountCode).toBe('1110'); // cash
+      expect(je.totalDebit.equals(je.totalCredit)).toBe(true);
+
+      const fa = await env.prisma.fixedAsset.findFirstOrThrow({
+        where: { expenseRecordId: accounted.expenseRecord!.id },
+      });
+      expect(fa.usefulLifeMonths).toBe(36);
+      expect(Number(fa.cost)).toBeCloseTo(30000, 2);
+      expect(Number(fa.bookValue)).toBeCloseTo(30000, 2);
+    });
+  });
 });

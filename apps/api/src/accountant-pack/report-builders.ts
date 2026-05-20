@@ -156,6 +156,7 @@ export async function buildPurchaseRegister(
     where: {
       companyId,
       status: 'RECORDED',
+      treatAsIntangible: false,
       expenseDate: { gte: range.start, lt: range.end },
     },
     include: { vendor: { select: { nameTh: true, taxId: true } } },
@@ -555,6 +556,7 @@ export async function buildProjectProfit(
     where: {
       companyId,
       status: 'RECORDED',
+      treatAsIntangible: false,
       expenseDate: { gte: range.start, lt: range.end },
       projectId: { not: null },
     },

@@ -99,6 +99,8 @@ export class ExpenseReceiptsService {
         ? 'PENDING_VENDOR_APPROVAL'
         : 'UPLOADED';
 
+    const billingNameMismatch = await this.isBillingMismatch(companyId, dto.billedToName);
+
     // C4: write file to disk only if we commit the receipt; clean up otherwise.
     // We persist the file *before* the tx so the row can reference its path, but
     // if the tx throws we unlink the orphan in finally.
@@ -140,6 +142,14 @@ export class ExpenseReceiptsService {
             foreignWhtType: dto.foreignWhtType ?? null,
             foreignWhtBorneBy: dto.foreignWhtBorneBy ?? null,
             foreignWhtRate: dto.foreignWhtRate ? new Prisma.Decimal(dto.foreignWhtRate) : null,
+            billedToName: this.blankToNull(dto.billedToName),
+            billingNameMismatch,
+            treatAsIntangible: dto.treatAsIntangible ?? false,
+            intangibleUsefulLifeMonths: dto.intangibleUsefulLifeMonths
+              ? Number(dto.intangibleUsefulLifeMonths)
+              : null,
+            serviceStart: dto.serviceStart ? new Date(dto.serviceStart) : null,
+            serviceEnd: dto.serviceEnd ? new Date(dto.serviceEnd) : null,
             originalFileName: file.originalname,
             storedPath: relativePath,
             mimeType: file.mimetype,
@@ -305,6 +315,11 @@ export class ExpenseReceiptsService {
       });
     }
 
+    const billingNameMismatch =
+      dto.billedToName !== undefined
+        ? await this.isBillingMismatch(companyId, dto.billedToName)
+        : undefined;
+
     // Partial update: only fields the client actually sent (!== undefined) are
     // touched. Sending an empty string clears the field (→ null / 0); omitting
     // it leaves the stored value intact — so fields not shown in the edit form
@@ -372,6 +387,25 @@ export class ExpenseReceiptsService {
               ? new Prisma.Decimal(dto.foreignWhtRate)
               : null
             : undefined,
+        billedToName:
+          dto.billedToName !== undefined ? this.blankToNull(dto.billedToName) : undefined,
+        billingNameMismatch,
+        treatAsIntangible:
+          dto.treatAsIntangible !== undefined ? dto.treatAsIntangible : undefined,
+        intangibleUsefulLifeMonths:
+          dto.intangibleUsefulLifeMonths !== undefined
+            ? dto.intangibleUsefulLifeMonths
+              ? Number(dto.intangibleUsefulLifeMonths)
+              : null
+            : undefined,
+        serviceStart:
+          dto.serviceStart !== undefined
+            ? dto.serviceStart
+              ? new Date(dto.serviceStart)
+              : null
+            : undefined,
+        serviceEnd:
+          dto.serviceEnd !== undefined ? (dto.serviceEnd ? new Date(dto.serviceEnd) : null) : undefined,
       },
       include: this.include(),
     });
@@ -559,6 +593,9 @@ export class ExpenseReceiptsService {
           foreignWhtType: receipt.foreignWhtType,
           foreignWhtBorneBy: receipt.foreignWhtBorneBy,
           foreignWhtRate: receipt.foreignWhtRate,
+          treatAsIntangible: receipt.treatAsIntangible,
+          serviceStart: receipt.serviceStart,
+          serviceEnd: receipt.serviceEnd,
           recordedBy: userId,
         },
       });
@@ -571,7 +608,10 @@ export class ExpenseReceiptsService {
       //   Cr Cash (grandTotal — what we actually paid out)
       //   Cr WHT Payable (whtAmount, if any)
       // Balance: subtotal + vat = grandTotal + wht ← guaranteed by H3.
-      const expenseAccount = expenseAccountForCategory(receipt.category);
+      // F4 — capitalize as intangible → debit the asset, not an expense account.
+      const expenseAccount = receipt.treatAsIntangible
+        ? ACCOUNTS.INTANGIBLE_ASSET
+        : expenseAccountForCategory(receipt.category);
       const lines: Parameters<typeof this.journal.postWithTx>[1]['lines'] = [
         {
           accountCode: expenseAccount.code,
@@ -610,6 +650,30 @@ export class ExpenseReceiptsService {
         sourceId: record.id,
         lines,
       });
+
+      // F4 — when capitalized, create a FixedAsset so the existing depreciation
+      // module amortizes it over its useful life. The journal above already
+      // debited the intangible-asset account; reports exclude this record from
+      // P&L expense (treatAsIntangible) so it isn't double-counted.
+      if (receipt.treatAsIntangible) {
+        await tx.fixedAsset.create({
+          data: {
+            companyId,
+            name:
+              receipt.category?.trim() ||
+              receipt.proposedVendorName?.trim() ||
+              'สินทรัพย์ไม่มีตัวตน',
+            category: ACCOUNTS.INTANGIBLE_ASSET.name,
+            acquiredAt: expenseDate,
+            cost: receipt.subtotal,
+            salvageValue: new Prisma.Decimal(0),
+            usefulLifeMonths: receipt.intangibleUsefulLifeMonths ?? 36,
+            accumulatedDepr: new Prisma.Decimal(0),
+            bookValue: receipt.subtotal,
+            expenseRecordId: record.id,
+          },
+        });
+      }
 
       // Snapshot INPUT VAT for tax reporting when the receipt has VAT.
       // We use the vendor's snapshot info (or proposedVendor fallback) so the
@@ -1052,6 +1116,24 @@ export class ExpenseReceiptsService {
     return trimmed ? trimmed : null;
   }
 
+  /**
+   * F4 — flag receipts billed to someone other than the company (e.g. a Cursor
+   * invoice issued to a personal name). True when billedToName is set and does
+   * not match the company's Thai/English name → the operator should attach a
+   * reimbursement voucher and fix the billing name going forward.
+   */
+  private async isBillingMismatch(companyId: string, billedToName?: string | null): Promise<boolean> {
+    if (!this.normalizeName(billedToName)) return false;
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { nameTh: true, nameEn: true },
+    });
+    if (!company) return false;
+    const norm = (s?: string | null) => this.normalizeName(s)?.toLocaleLowerCase('th-TH') ?? '';
+    const target = norm(billedToName);
+    return target !== norm(company.nameTh) && target !== norm(company.nameEn);
+  }
+
   private async requireVendor(companyId: string, vendorId: string) {
     const vendor = await this.prisma.partner.findFirst({
       where: {
@@ -1196,6 +1278,8 @@ export class ExpenseReceiptsService {
       foreignSubtotal: receipt.foreignSubtotal?.toString() ?? null,
       reverseChargeVatRate: receipt.reverseChargeVatRate.toString(),
       foreignWhtRate: receipt.foreignWhtRate?.toString() ?? null,
+      serviceStart: receipt.serviceStart?.toISOString() ?? null,
+      serviceEnd: receipt.serviceEnd?.toISOString() ?? null,
       expenseRecord: receipt.expenseRecord
         ? {
             ...receipt.expenseRecord,
@@ -1206,6 +1290,8 @@ export class ExpenseReceiptsService {
             fxRate: receipt.expenseRecord.fxRate.toString(),
             foreignSubtotal: receipt.expenseRecord.foreignSubtotal?.toString() ?? null,
             foreignWhtRate: receipt.expenseRecord.foreignWhtRate?.toString() ?? null,
+            serviceStart: receipt.expenseRecord.serviceStart?.toISOString() ?? null,
+            serviceEnd: receipt.expenseRecord.serviceEnd?.toISOString() ?? null,
             foreignTaxObligations: receipt.expenseRecord.foreignTaxObligations.map((o) =>
               this.obligationToDto(o),
             ),

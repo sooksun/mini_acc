@@ -170,4 +170,29 @@ export class UploadExpenseReceiptDto {
   @IsString()
   @Matches(PERCENT, { message: 'foreignWhtRate ต้องเป็นอัตราภาษี เช่น 5' })
   foreignWhtRate?: string;
+
+  // ---- F4: capitalize-as-intangible / prepaid window / billing-name guard ----
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  billedToName?: string;
+
+  @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  treatAsIntangible?: boolean;
+
+  @IsOptional()
+  @Transform(stripMoneySeparators)
+  @IsString()
+  @Matches(/^\d{1,3}$/, { message: 'intangibleUsefulLifeMonths ต้องเป็นจำนวนเดือน (1-3 หลัก)' })
+  intangibleUsefulLifeMonths?: string;
+
+  @IsOptional()
+  @IsDateString()
+  serviceStart?: string;
+
+  @IsOptional()
+  @IsDateString()
+  serviceEnd?: string;
 }

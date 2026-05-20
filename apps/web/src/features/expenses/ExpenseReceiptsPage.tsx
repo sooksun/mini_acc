@@ -87,6 +87,12 @@ interface ExpenseReceipt {
   foreignWhtType: 'ROYALTY' | 'SERVICE' | 'OTHER' | null;
   foreignWhtBorneBy: 'WITHHELD' | 'RECOVERABLE' | 'GROSSED_UP' | null;
   foreignWhtRate: string | null;
+  billedToName: string | null;
+  billingNameMismatch: boolean;
+  treatAsIntangible: boolean;
+  intangibleUsefulLifeMonths: number | null;
+  serviceStart: string | null;
+  serviceEnd: string | null;
   originalFileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -131,6 +137,12 @@ const EMPTY_UPLOAD = {
   foreignWhtType: '' as '' | 'ROYALTY' | 'SERVICE' | 'OTHER',
   foreignWhtBorneBy: '' as '' | 'WITHHELD' | 'RECOVERABLE' | 'GROSSED_UP',
   foreignWhtRate: '',
+  // F4 — billing-name guard / capitalize / prepaid window
+  billedToName: '',
+  treatAsIntangible: false,
+  intangibleUsefulLifeMonths: '',
+  serviceStart: '',
+  serviceEnd: '',
 };
 
 type ExpenseForm = typeof EMPTY_UPLOAD;
@@ -164,6 +176,12 @@ const FOREIGN_KEYS = new Set([
   'foreignWhtType',
   'foreignWhtBorneBy',
   'foreignWhtRate',
+  // F4 — handled via capitalizationPayload (booleans/dates/optionals)
+  'billedToName',
+  'treatAsIntangible',
+  'intangibleUsefulLifeMonths',
+  'serviceStart',
+  'serviceEnd',
 ]);
 
 const THAI_MONTHS_SHORT = [
@@ -189,6 +207,19 @@ function foreignPayload(form: ExpenseForm): Record<string, string | boolean> {
     const value = (form as Record<string, unknown>)[key];
     if (typeof value === 'string' && value.trim()) out[key] = value;
   }
+  return out;
+}
+
+/** F4 fields — sent for every expense (not foreign-only). */
+function capitalizationPayload(form: ExpenseForm): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {
+    billedToName: form.billedToName,
+    treatAsIntangible: form.treatAsIntangible,
+  };
+  if (form.intangibleUsefulLifeMonths.trim())
+    out.intangibleUsefulLifeMonths = form.intangibleUsefulLifeMonths;
+  if (form.serviceStart) out.serviceStart = form.serviceStart;
+  if (form.serviceEnd) out.serviceEnd = form.serviceEnd;
   return out;
 }
 
@@ -392,6 +423,11 @@ export function ExpenseReceiptsPage() {
                       <div className="font-mono text-[11px] text-text-mute">
                         {item.vendor?.taxId ?? item.proposedVendorTaxId ?? 'ไม่มีเลขผู้เสียภาษี'}
                       </div>
+                      {item.billingNameMismatch && (
+                        <span className="mt-0.5 inline-flex rounded-full border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[10px] text-warn">
+                          ชื่อบนใบไม่ตรงกิจการ
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div>{item.documentNumber ?? item.originalFileName}</div>
@@ -596,6 +632,9 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
         body.set(key, value);
       });
       Object.entries(foreignPayload(form)).forEach(([key, value]) => body.set(key, String(value)));
+      Object.entries(capitalizationPayload(form)).forEach(([key, value]) =>
+        body.set(key, String(value)),
+      );
       await api('/expense-receipts/upload', { method: 'POST', body });
       toast.success('อัปโหลดใบเสร็จแล้ว');
       setFile(null);
@@ -652,6 +691,7 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
         <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
         <Field label="ยอดสุทธิ (บาท)" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} disabled={form.isForeign} />
         <ForeignExpenseSection form={form} setForm={setForm} />
+        <CapitalizationFields form={form} setForm={setForm} />
         <label className="md:col-span-2">
           <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย / หมายเหตุ</span>
           <textarea
@@ -988,6 +1028,14 @@ function EditReceiptModal({
       foreignWhtType: receipt.foreignWhtType ?? '',
       foreignWhtBorneBy: receipt.foreignWhtBorneBy ?? '',
       foreignWhtRate: receipt.foreignWhtRate ?? '',
+      billedToName: receipt.billedToName ?? '',
+      treatAsIntangible: receipt.treatAsIntangible,
+      intangibleUsefulLifeMonths:
+        receipt.intangibleUsefulLifeMonths != null
+          ? String(receipt.intangibleUsefulLifeMonths)
+          : '',
+      serviceStart: receipt.serviceStart ? receipt.serviceStart.slice(0, 10) : '',
+      serviceEnd: receipt.serviceEnd ? receipt.serviceEnd.slice(0, 10) : '',
     });
   }, [receipt]);
 
@@ -1031,7 +1079,7 @@ function EditReceiptModal({
         }
         if (typeof value === 'string') payload[key] = value;
       });
-      Object.assign(payload, foreignPayload(form));
+      Object.assign(payload, foreignPayload(form), capitalizationPayload(form));
       await api(`/expense-receipts/${receipt.id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
@@ -1087,6 +1135,7 @@ function EditReceiptModal({
         <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
         <Field label="ยอดสุทธิ (บาท)" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} disabled={form.isForeign} />
         <ForeignExpenseSection form={form} setForm={setForm} />
+        <CapitalizationFields form={form} setForm={setForm} />
         <label className="md:col-span-2">
           <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย</span>
           <textarea
@@ -1360,6 +1409,72 @@ function ForeignExpenseSection({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CapitalizationFields({
+  form,
+  setForm,
+}: {
+  form: ExpenseForm;
+  setForm: Dispatch<SetStateAction<ExpenseForm>>;
+}) {
+  return (
+    <div className="md:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="md:col-span-2">
+          <span className="mb-1 block text-[12.5px] text-text-soft">
+            ชื่อผู้ซื้อบนใบ (กรอกเมื่อไม่ใช่ชื่อกิจการ)
+          </span>
+          <input
+            value={form.billedToName}
+            onChange={(e) => setForm((v) => ({ ...v, billedToName: e.target.value }))}
+            placeholder="เช่น ชื่อบุคคลบนใบแจ้งหนี้ Cursor"
+            className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+          />
+        </label>
+        {form.billedToName.trim() && (
+          <div className="md:col-span-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-[12px] text-warn">
+            ถ้าชื่อบนใบไม่ใช่ชื่อกิจการ ให้แนบใบสำคัญจ่ายคืน + เหตุผลใช้ในกิจการ และแก้ billing name รอบหน้า
+          </div>
+        )}
+        <label className="flex items-center gap-2 text-[12.5px] text-text-soft md:col-span-2">
+          <input
+            type="checkbox"
+            checked={form.treatAsIntangible}
+            onChange={(e) => setForm((v) => ({ ...v, treatAsIntangible: e.target.checked }))}
+          />
+          ลงเป็นสินทรัพย์ไม่มีตัวตน (ตัดจำหน่ายแทนลงค่าใช้จ่ายทันที)
+        </label>
+        {form.treatAsIntangible && (
+          <Field
+            label="อายุการใช้งาน (เดือน)"
+            value={form.intangibleUsefulLifeMonths}
+            onChange={(intangibleUsefulLifeMonths) =>
+              setForm((v) => ({ ...v, intangibleUsefulLifeMonths }))
+            }
+            placeholder="36"
+          />
+        )}
+        <Field
+          type="date"
+          label="ช่วงบริการ — เริ่ม (จ่ายล่วงหน้า)"
+          value={form.serviceStart}
+          onChange={(serviceStart) => setForm((v) => ({ ...v, serviceStart }))}
+        />
+        <Field
+          type="date"
+          label="ช่วงบริการ — สิ้นสุด"
+          value={form.serviceEnd}
+          onChange={(serviceEnd) => setForm((v) => ({ ...v, serviceEnd }))}
+        />
+        {form.serviceStart && form.serviceEnd && !form.treatAsIntangible && (
+          <div className="md:col-span-2 text-[11.5px] text-text-mute">
+            ช่วงบริการคร่อมเดือน — บันทึกไว้ให้นักบัญชีทยอยรับรู้ค่าใช้จ่าย (prepaid); ระบบยังลงค่าใช้จ่ายเต็มในงวดที่จ่าย
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -607,6 +607,14 @@ model ExpenseReceipt {
   foreignWhtBorneBy ForeignWhtBorneBy?
   foreignWhtRate    Decimal?           @db.Decimal(5, 2)
 
+  // F4 — billing-name guard / capitalize-as-intangible / prepaid window
+  billedToName               String?   @db.VarChar(200)
+  billingNameMismatch        Boolean   @default(false)
+  treatAsIntangible          Boolean   @default(false)
+  intangibleUsefulLifeMonths Int?
+  serviceStart               DateTime?
+  serviceEnd                 DateTime?
+
   originalFileName String  @db.VarChar(300)
   storedPath       String  @db.VarChar(500)
   mimeType         String  @db.VarChar(100)
@@ -659,6 +667,9 @@ model ExpenseRecord {
   foreignWhtType    ForeignWhtType?
   foreignWhtBorneBy ForeignWhtBorneBy?
   foreignWhtRate    Decimal?           @db.Decimal(5, 2)
+  treatAsIntangible Boolean            @default(false)
+  serviceStart      DateTime?
+  serviceEnd        DateTime?
 
   recordedBy String?
   recordedAt DateTime @default(now())

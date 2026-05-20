@@ -25,6 +25,7 @@ export const ACCOUNTS = {
   INPUT_VAT: { code: '1151', name: 'ภาษีซื้อ' },
   WHT_RECEIVABLE: { code: '1152', name: 'ภาษีหัก ณ ที่จ่ายรอเรียกคืน' },
   OTHER_RECEIVABLE_WHT: { code: '1153', name: 'ลูกหนี้อื่น-ภาษีจ่ายแทนผู้ขายต่างประเทศ' },
+  INTANGIBLE_ASSET: { code: '1410', name: 'สินทรัพย์ไม่มีตัวตน - โปรแกรมคอมพิวเตอร์' },
   AP: { code: '2110', name: 'เจ้าหนี้การค้า' },
   OUTPUT_VAT: { code: '2151', name: 'ภาษีขาย' },
   WHT_PAYABLE: { code: '2152', name: 'ภาษีหัก ณ ที่จ่ายค้างจ่าย' },
