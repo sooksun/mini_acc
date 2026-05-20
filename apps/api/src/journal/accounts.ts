@@ -24,12 +24,14 @@ export const ACCOUNTS = {
   AR: { code: '1130', name: 'ลูกหนี้การค้า' },
   INPUT_VAT: { code: '1151', name: 'ภาษีซื้อ' },
   WHT_RECEIVABLE: { code: '1152', name: 'ภาษีหัก ณ ที่จ่ายรอเรียกคืน' },
+  OTHER_RECEIVABLE_WHT: { code: '1153', name: 'ลูกหนี้อื่น-ภาษีจ่ายแทนผู้ขายต่างประเทศ' },
   AP: { code: '2110', name: 'เจ้าหนี้การค้า' },
   OUTPUT_VAT: { code: '2151', name: 'ภาษีขาย' },
   WHT_PAYABLE: { code: '2152', name: 'ภาษีหัก ณ ที่จ่ายค้างจ่าย' },
   REVENUE_SERVICE: { code: '4110', name: 'รายได้ค่าบริการ' },
   REVENUE_SALE: { code: '4120', name: 'รายได้จากการขาย' },
   EXPENSE_GENERAL: { code: '5000', name: 'ค่าใช้จ่ายทั่วไป' },
+  WHT_BORNE_EXPENSE: { code: '5920', name: 'ภาษีจ่ายแทนผู้ขายต่างประเทศ' },
 } as const satisfies Record<string, AccountRef>;
 
 /**

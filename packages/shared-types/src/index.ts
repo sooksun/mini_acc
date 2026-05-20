@@ -104,6 +104,22 @@ export const ForeignTaxStatus = {
 } as const;
 export type ForeignTaxStatus = (typeof ForeignTaxStatus)[keyof typeof ForeignTaxStatus];
 
+/** ประเภทเงินได้สำหรับหัก ณ ที่จ่ายต่างประเทศ (ภ.ง.ด.54) */
+export const ForeignWhtType = {
+  ROYALTY: 'ROYALTY', // ค่าสิทธิ มาตรา 40(3) เช่น license ซอฟต์แวร์
+  SERVICE: 'SERVICE', // ค่าบริการ/กำไรธุรกิจ
+  OTHER: 'OTHER',
+} as const;
+export type ForeignWhtType = (typeof ForeignWhtType)[keyof typeof ForeignWhtType];
+
+/** ผู้รับภาระภาษีหัก ณ ที่จ่าย (ภ.ง.ด.54) */
+export const ForeignWhtBorneBy = {
+  WITHHELD: 'WITHHELD', // หักจากเงินที่จ่ายผู้ขาย
+  RECOVERABLE: 'RECOVERABLE', // จ่ายเต็ม แล้วเรียกคืนจากผู้ขาย
+  GROSSED_UP: 'GROSSED_UP', // กิจการรับภาระเอง (gross-up)
+} as const;
+export type ForeignWhtBorneBy = (typeof ForeignWhtBorneBy)[keyof typeof ForeignWhtBorneBy];
+
 export const PaymentDirection = {
   IN: 'IN',
   OUT: 'OUT',

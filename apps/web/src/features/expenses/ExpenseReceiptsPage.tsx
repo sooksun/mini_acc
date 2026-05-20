@@ -52,6 +52,8 @@ interface ForeignTaxObligation {
     expenseDate: string;
     currency: string;
     foreignSubtotal: string | null;
+    foreignWhtType: 'ROYALTY' | 'SERVICE' | 'OTHER' | null;
+    foreignWhtBorneBy: 'WITHHELD' | 'RECOVERABLE' | 'GROSSED_UP' | null;
     vendor: { nameTh: string } | null;
   } | null;
 }
@@ -82,6 +84,9 @@ interface ExpenseReceipt {
   reverseChargeVat: boolean;
   reverseChargeVatRate: string;
   dtaCountry: string | null;
+  foreignWhtType: 'ROYALTY' | 'SERVICE' | 'OTHER' | null;
+  foreignWhtBorneBy: 'WITHHELD' | 'RECOVERABLE' | 'GROSSED_UP' | null;
+  foreignWhtRate: string | null;
   originalFileName: string;
   mimeType: string;
   sizeBytes: number;
@@ -122,6 +127,10 @@ const EMPTY_UPLOAD = {
   reverseChargeVat: false,
   reverseChargeVatRate: '',
   dtaCountry: '',
+  // PND.54 (F3)
+  foreignWhtType: '' as '' | 'ROYALTY' | 'SERVICE' | 'OTHER',
+  foreignWhtBorneBy: '' as '' | 'WITHHELD' | 'RECOVERABLE' | 'GROSSED_UP',
+  foreignWhtRate: '',
 };
 
 type ExpenseForm = typeof EMPTY_UPLOAD;
@@ -135,6 +144,9 @@ const FOREIGN_SKIP_IF_EMPTY = new Set([
   'fxRate',
   'foreignSubtotal',
   'reverseChargeVatRate',
+  'foreignWhtType',
+  'foreignWhtBorneBy',
+  'foreignWhtRate',
 ]);
 
 // All foreign-expense keys — excluded from the generic field loop so booleans
@@ -149,6 +161,9 @@ const FOREIGN_KEYS = new Set([
   'reverseChargeVat',
   'reverseChargeVatRate',
   'dtaCountry',
+  'foreignWhtType',
+  'foreignWhtBorneBy',
+  'foreignWhtRate',
 ]);
 
 const THAI_MONTHS_SHORT = [
@@ -293,7 +308,7 @@ export function ExpenseReceiptsPage() {
               onClick={() => setPp36Open(true)}
               className="rounded-md border border-border bg-surface px-4 py-2 text-[13px] font-medium text-text-soft hover:bg-surface-3"
             >
-              ภ.พ.36 นำส่ง
+              ภาษีนำส่ง (ภ.พ.36/54)
             </button>
             {canUpload && (
               <button
@@ -358,11 +373,11 @@ export function ExpenseReceiptsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center"><Spinner /></td>
+                  <td colSpan={7} className="px-4 py-10 text-center"><Spinner /></td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10">
+                  <td colSpan={7} className="px-4 py-10">
                     <Empty title="ยังไม่มีใบเสร็จรายจ่าย" description="เริ่มจากอัปโหลดไฟล์ PDF หรือรูปภาพใบเสร็จ" />
                   </td>
                 </tr>
@@ -970,6 +985,9 @@ function EditReceiptModal({
       reverseChargeVat: receipt.reverseChargeVat,
       reverseChargeVatRate: receipt.isForeign ? receipt.reverseChargeVatRate : '',
       dtaCountry: receipt.dtaCountry ?? '',
+      foreignWhtType: receipt.foreignWhtType ?? '',
+      foreignWhtBorneBy: receipt.foreignWhtBorneBy ?? '',
+      foreignWhtRate: receipt.foreignWhtRate ?? '',
     });
   }, [receipt]);
 
@@ -1137,6 +1155,28 @@ function ForeignExpenseSection({
       ? ((Number(thb) * Number(rate)) / 100).toFixed(2)
       : '';
 
+  const whtRate = Number(form.foreignWhtRate || '0') || 0;
+  const whtActive = !!form.foreignWhtType && whtRate > 0 && !!thb;
+  const whtAmount = whtActive
+    ? form.foreignWhtBorneBy === 'GROSSED_UP'
+      ? Number(thb) / (1 - whtRate / 100) - Number(thb)
+      : (Number(thb) * whtRate) / 100
+    : 0;
+
+  async function suggestRate() {
+    try {
+      const params = new URLSearchParams();
+      if (form.dtaCountry) params.set('country', form.dtaCountry);
+      params.set('incomeType', form.foreignWhtType || 'OTHER');
+      const res = await api<{ rate: string } | null>(
+        `/expense-receipts/foreign-wht-rate?${params.toString()}`,
+      );
+      if (res && res.rate) setForm((v) => ({ ...v, foreignWhtRate: res.rate }));
+    } catch {
+      /* suggestion only — ignore lookup errors */
+    }
+  }
+
   return (
     <div className="md:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
       <label className="flex cursor-pointer items-center gap-2 text-[13px] font-medium">
@@ -1234,6 +1274,90 @@ function ForeignExpenseSection({
               />
             </>
           )}
+
+          {/* PND.54 — withholding tax on the foreign payment */}
+          <div className="md:col-span-2 border-t border-border pt-3">
+            <div className="mb-2 text-[12.5px] font-medium text-text-soft">
+              หัก ณ ที่จ่าย (ภ.ง.ด.54)
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className="mb-1 block text-[12.5px] text-text-soft">ประเภทเงินได้</span>
+                <select
+                  value={form.foreignWhtType}
+                  onChange={(e) =>
+                    setForm((v) => ({
+                      ...v,
+                      foreignWhtType: e.target.value as '' | 'ROYALTY' | 'SERVICE' | 'OTHER',
+                    }))
+                  }
+                  className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+                >
+                  <option value="">— ไม่หัก ณ ที่จ่าย —</option>
+                  <option value="ROYALTY">ค่าสิทธิ 40(3) (license/ซอฟต์แวร์)</option>
+                  <option value="SERVICE">ค่าบริการ/กำไรธุรกิจ</option>
+                  <option value="OTHER">อื่น ๆ</option>
+                </select>
+              </label>
+              {form.foreignWhtType && (
+                <label>
+                  <span className="mb-1 block text-[12.5px] text-text-soft">ผู้รับภาระภาษี</span>
+                  <select
+                    value={form.foreignWhtBorneBy}
+                    onChange={(e) =>
+                      setForm((v) => ({
+                        ...v,
+                        foreignWhtBorneBy: e.target.value as
+                          | ''
+                          | 'WITHHELD'
+                          | 'RECOVERABLE'
+                          | 'GROSSED_UP',
+                      }))
+                    }
+                    className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+                  >
+                    <option value="">— เลือก —</option>
+                    <option value="WITHHELD">หักจากผู้ขาย</option>
+                    <option value="RECOVERABLE">จ่ายเต็ม เรียกคืนภายหลัง</option>
+                    <option value="GROSSED_UP">กิจการรับภาระเอง (gross-up)</option>
+                  </select>
+                </label>
+              )}
+              {form.foreignWhtType && (
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Field
+                      label="อัตรา (%)"
+                      value={form.foreignWhtRate}
+                      onChange={(foreignWhtRate) => setForm((v) => ({ ...v, foreignWhtRate }))}
+                      placeholder="5"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={suggestRate}
+                    className="mb-[1px] rounded-md border border-border bg-surface px-3 py-2 text-[12px] text-text-soft hover:bg-surface-3"
+                  >
+                    ดึงอัตราแนะนำ
+                  </button>
+                </div>
+              )}
+              {whtAmount > 0 && (
+                <div className="md:col-span-2 rounded-md border border-info/40 bg-info/5 px-3 py-2 text-[12px] text-text-soft">
+                  ภ.ง.ด.54 ประมาณ{' '}
+                  <span className="font-mono font-medium text-text">{whtAmount.toFixed(2)}</span> บาท
+                  {form.foreignWhtBorneBy === 'WITHHELD'
+                    ? ' — กรอกยอดนี้ในช่อง “หัก ณ ที่จ่าย” ด้วย เพื่อหักจากยอดจ่ายผู้ขาย'
+                    : form.foreignWhtBorneBy === 'GROSSED_UP'
+                      ? ' (gross-up — เป็นค่าใช้จ่ายเพิ่มของกิจการ)'
+                      : form.foreignWhtBorneBy === 'RECOVERABLE'
+                        ? ' (จ่ายเต็มก่อน ตั้งเป็นลูกหนี้รอเรียกคืน)'
+                        : ''}
+                  {' — นักบัญชีต้องยืนยันประเภท/อัตราตามอนุสัญญา'}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1243,6 +1367,12 @@ function ForeignExpenseSection({
 function periodLabel(year: number, month: number): string {
   return `${THAI_MONTHS_SHORT[month - 1] ?? month} ${year + 543}`;
 }
+
+const WHT_BORNE_LABEL: Record<string, string> = {
+  WITHHELD: 'หักจากผู้ขาย',
+  RECOVERABLE: 'เรียกคืน',
+  GROSSED_UP: 'gross-up',
+};
 
 function Pp36Modal({
   open,
@@ -1257,13 +1387,14 @@ function Pp36Modal({
   const [items, setItems] = useState<ForeignTaxObligation[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'PENDING' | 'FILED' | ''>('PENDING');
+  const [kindFilter, setKindFilter] = useState<'' | 'PP36_VAT' | 'PND54_WHT'>('');
   const [filing, setFiling] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('kind', 'PP36_VAT');
+      if (kindFilter) params.set('kind', kindFilter);
       if (statusFilter) params.set('status', statusFilter);
       params.set('take', '100');
       const res = await api<{ items: ForeignTaxObligation[]; total: number }>(
@@ -1281,7 +1412,7 @@ function Pp36Modal({
     if (!open) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, statusFilter]);
+  }, [open, statusFilter, kindFilter]);
 
   async function file(id: string) {
     setFiling(id);
@@ -1290,7 +1421,7 @@ function Pp36Modal({
         method: 'POST',
         body: JSON.stringify({}),
       });
-      toast.success('บันทึกการนำส่ง ภ.พ.36 แล้ว — ตั้งภาษีซื้อเดือนถัดไปให้อัตโนมัติ');
+      toast.success('บันทึกการนำส่งภาษีแล้ว');
       load();
     } catch (e: any) {
       toast.error(e.message);
@@ -1307,7 +1438,7 @@ function Pp36Modal({
     <Modal
       open={open}
       onClose={onClose}
-      title="ภ.พ.36 — VAT นำส่งแทนผู้ขายต่างประเทศ"
+      title="ภาษีนำส่ง — ภ.พ.36 (VAT) / ภ.ง.ด.54 (WHT)"
       size="xl"
       footer={
         <button
@@ -1321,15 +1452,26 @@ function Pp36Modal({
     >
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'PENDING' | 'FILED' | '')}
-            className="rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:border-brand"
-          >
-            <option value="PENDING">รอนำส่ง</option>
-            <option value="FILED">นำส่งแล้ว</option>
-            <option value="">ทั้งหมด</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={kindFilter}
+              onChange={(e) => setKindFilter(e.target.value as '' | 'PP36_VAT' | 'PND54_WHT')}
+              className="rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:border-brand"
+            >
+              <option value="">ทุกประเภท</option>
+              <option value="PP36_VAT">ภ.พ.36 (VAT)</option>
+              <option value="PND54_WHT">ภ.ง.ด.54 (WHT)</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'PENDING' | 'FILED' | '')}
+              className="rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:border-brand"
+            >
+              <option value="PENDING">รอนำส่ง</option>
+              <option value="FILED">นำส่งแล้ว</option>
+              <option value="">ทั้งหมด</option>
+            </select>
+          </div>
           {statusFilter !== 'FILED' && (
             <div className="text-[12.5px] text-text-soft">
               รวมที่ต้องนำส่ง:{' '}
@@ -1345,24 +1487,25 @@ function Pp36Modal({
           <table className="w-full text-[13px]">
             <thead className="bg-surface-2 text-left text-text-soft">
               <tr>
+                <th className="px-3 py-2 font-medium">ประเภท</th>
                 <th className="px-3 py-2 font-medium">ผู้ขาย / เอกสาร</th>
                 <th className="px-3 py-2 font-medium">งวดรายจ่าย</th>
                 <th className="px-3 py-2 font-medium">งวดยื่น</th>
                 <th className="px-3 py-2 text-right font-medium">ฐาน (บาท)</th>
-                <th className="px-3 py-2 text-right font-medium">VAT 7%</th>
+                <th className="px-3 py-2 text-right font-medium">ภาษี</th>
                 <th className="px-3 py-2 text-right font-medium">สถานะ</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8 text-center">
+                  <td colSpan={7} className="px-3 py-8 text-center">
                     <Spinner />
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-8">
+                  <td colSpan={7} className="px-3 py-8">
                     <Empty
                       title="ไม่มีรายการ ภ.พ.36"
                       description="ลงรายจ่ายต่างประเทศ (บริการ ใช้ในไทย) ที่ติ๊ก ภ.พ.36 เพื่อให้ระบบตั้งยอดให้"
@@ -1373,9 +1516,23 @@ function Pp36Modal({
                 items.map((o) => (
                   <tr key={o.id} className="border-t border-border align-top">
                     <td className="px-3 py-2">
+                      <span
+                        className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${
+                          o.kind === 'PP36_VAT'
+                            ? 'border-info/40 bg-info/10 text-info'
+                            : 'border-warn/40 bg-warn/10 text-warn'
+                        }`}
+                      >
+                        {o.kind === 'PP36_VAT' ? 'ภ.พ.36' : 'ภ.ง.ด.54'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
                       <div className="font-medium">{o.expenseRecord?.vendor?.nameTh ?? '—'}</div>
                       <div className="text-[11px] text-text-mute">
                         {o.expenseRecord?.documentNumber ?? o.expenseRecord?.category ?? ''}
+                        {o.kind === 'PND54_WHT' && o.expenseRecord?.foreignWhtBorneBy
+                          ? ` · ${WHT_BORNE_LABEL[o.expenseRecord.foreignWhtBorneBy]}`
+                          : ''}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-text-soft">
@@ -1415,8 +1572,8 @@ function Pp36Modal({
         </div>
 
         <p className="text-[11.5px] text-text-mute">
-          ภ.พ.36 ยื่นภายในวันที่ 7 (กระดาษ) / 15 (e-Filing) ของเดือนถัดไป — VAT 7% ที่นำส่งจะถูกตั้งเป็น
-          ภาษีซื้อใน ภ.พ.30 ของเดือนที่นำส่งโดยอัตโนมัติ
+          ภ.พ.36 / ภ.ง.ด.54 ยื่นภายในวันที่ 7 ของเดือนถัดไป — VAT จาก ภ.พ.36 ตั้งเป็นภาษีซื้อใน ภ.พ.30
+          และ ภ.ง.ด.54 บันทึกเป็น WHT (หนังสือรับรอง 50 ทวิ + รายงานออกได้ที่หน้า ภาษี VAT/WHT)
         </p>
       </div>
     </Modal>

@@ -137,6 +137,9 @@ export class ExpenseReceiptsService {
               ? new Prisma.Decimal(dto.reverseChargeVatRate)
               : new Prisma.Decimal(7),
             dtaCountry: this.blankToNull(dto.dtaCountry),
+            foreignWhtType: dto.foreignWhtType ?? null,
+            foreignWhtBorneBy: dto.foreignWhtBorneBy ?? null,
+            foreignWhtRate: dto.foreignWhtRate ? new Prisma.Decimal(dto.foreignWhtRate) : null,
             originalFileName: file.originalname,
             storedPath: relativePath,
             mimeType: file.mimetype,
@@ -360,6 +363,15 @@ export class ExpenseReceiptsService {
               : new Prisma.Decimal(7)
             : undefined,
         dtaCountry: dto.dtaCountry !== undefined ? this.blankToNull(dto.dtaCountry) : undefined,
+        foreignWhtType: dto.foreignWhtType !== undefined ? (dto.foreignWhtType ?? null) : undefined,
+        foreignWhtBorneBy:
+          dto.foreignWhtBorneBy !== undefined ? (dto.foreignWhtBorneBy ?? null) : undefined,
+        foreignWhtRate:
+          dto.foreignWhtRate !== undefined
+            ? dto.foreignWhtRate
+              ? new Prisma.Decimal(dto.foreignWhtRate)
+              : null
+            : undefined,
       },
       include: this.include(),
     });
@@ -544,6 +556,9 @@ export class ExpenseReceiptsService {
           currency: receipt.currency,
           fxRate: receipt.fxRate,
           foreignSubtotal: receipt.foreignSubtotal,
+          foreignWhtType: receipt.foreignWhtType,
+          foreignWhtBorneBy: receipt.foreignWhtBorneBy,
+          foreignWhtRate: receipt.foreignWhtRate,
           recordedBy: userId,
         },
       });
@@ -662,6 +677,54 @@ export class ExpenseReceiptsService {
         });
       }
 
+      // PND.54 — withholding tax on the foreign payment. Created PENDING; the
+      // file step posts the remittance journal (debit account varies by who
+      // bears the tax) and a WithholdingTaxRecord(PAYABLE) → WHT report + 50-ทวิ.
+      if (
+        receipt.isForeign &&
+        receipt.foreignWhtType &&
+        receipt.foreignWhtRate &&
+        receipt.foreignWhtRate.gt(0)
+      ) {
+        const rate = receipt.foreignWhtRate;
+        let base = receipt.subtotal;
+        let tax: Prisma.Decimal;
+        if (receipt.foreignWhtBorneBy === 'GROSSED_UP') {
+          // Company bears the tax: gross up the net paid to the vendor.
+          base = receipt.subtotal
+            .mul(100)
+            .div(new Prisma.Decimal(100).minus(rate))
+            .toDecimalPlaces(2);
+          tax = base.minus(receipt.subtotal).toDecimalPlaces(2);
+        } else if (receipt.foreignWhtBorneBy === 'WITHHELD') {
+          // Already deducted from the vendor at payment → use the amount withheld.
+          tax = receipt.withholdingTaxAmount.gt(0)
+            ? receipt.withholdingTaxAmount
+            : receipt.subtotal.mul(rate).div(100).toDecimalPlaces(2);
+        } else {
+          // RECOVERABLE (paid full, recover later) → statutory on the base.
+          tax = receipt.subtotal.mul(rate).div(100).toDecimalPlaces(2);
+        }
+        const wy = expenseDate.getFullYear();
+        const wm = expenseDate.getMonth() + 1;
+        const wfile = this.nextPeriod(wy, wm);
+        await tx.foreignTaxObligation.create({
+          data: {
+            companyId,
+            expenseRecordId: record.id,
+            kind: 'PND54_WHT',
+            status: 'PENDING',
+            baseAmount: base,
+            rate,
+            taxAmount: tax,
+            expensePeriodYear: wy,
+            expensePeriodMonth: wm,
+            filePeriodYear: wfile.year,
+            filePeriodMonth: wfile.month,
+          },
+        });
+      }
+
       return tx.expenseReceipt.update({
         where: { id },
         data: {
@@ -714,6 +777,8 @@ export class ExpenseReceiptsService {
               expenseDate: true,
               currency: true,
               foreignSubtotal: true,
+              foreignWhtType: true,
+              foreignWhtBorneBy: true,
               vendor: { select: { nameTh: true } },
             },
           },
@@ -759,19 +824,15 @@ export class ExpenseReceiptsService {
         expenseRecord: {
           select: {
             documentNumber: true,
+            expenseDate: true,
+            foreignWhtType: true,
+            foreignWhtBorneBy: true,
             vendor: { select: { nameTh: true } },
           },
         },
       },
     });
     if (!obligation) throw new NotFoundException('Foreign tax obligation not found');
-    if (obligation.kind !== 'PP36_VAT') {
-      throw new UnprocessableEntityException({
-        statusCode: 422,
-        code: 'UNSUPPORTED_OBLIGATION',
-        message: 'เฟสนี้รองรับเฉพาะการนำส่ง ภ.พ.36',
-      });
-    }
     if (obligation.status !== 'PENDING') {
       throw new UnprocessableEntityException({
         statusCode: 422,
@@ -792,42 +853,100 @@ export class ExpenseReceiptsService {
     const vendorName = obligation.expenseRecord.vendor?.nameTh ?? 'foreign vendor';
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const entry = await this.journal.postWithTx(tx, {
-        companyId,
-        userId,
-        entryDate,
-        description: `นำส่ง ภ.พ.36 — ${vendorName} (ภาษีซื้อ ${obligation.taxAmount.toString()})`,
-        sourceType: 'ADJUSTMENT',
-        sourceId: obligation.id,
-        lines: [
-          {
-            accountCode: ACCOUNTS.INPUT_VAT.code,
-            accountName: ACCOUNTS.INPUT_VAT.name,
-            debit: obligation.taxAmount,
-            description: 'ภาษีซื้อจาก ภ.พ.36',
-          },
-          {
-            accountCode: ACCOUNTS.CASH.code,
-            accountName: ACCOUNTS.CASH.name,
-            credit: obligation.taxAmount,
-            description: 'นำส่ง ภ.พ.36',
-          },
-        ],
-      });
+      let entryId: string;
 
-      await this.vat.recordWithTx(tx, {
-        companyId,
-        recordType: 'INPUT',
-        sourceType: 'PP36_OBLIGATION',
-        sourceId: obligation.id,
-        documentDate: entryDate,
-        documentNumber: obligation.expenseRecord.documentNumber,
-        partnerName: vendorName,
-        partnerTaxId: null,
-        baseAmount: obligation.baseAmount,
-        vatRate: obligation.rate,
-        vatAmount: obligation.taxAmount,
-      });
+      if (obligation.kind === 'PP36_VAT') {
+        const entry = await this.journal.postWithTx(tx, {
+          companyId,
+          userId,
+          entryDate,
+          description: `นำส่ง ภ.พ.36 — ${vendorName} (ภาษีซื้อ ${obligation.taxAmount.toString()})`,
+          sourceType: 'ADJUSTMENT',
+          sourceId: obligation.id,
+          lines: [
+            {
+              accountCode: ACCOUNTS.INPUT_VAT.code,
+              accountName: ACCOUNTS.INPUT_VAT.name,
+              debit: obligation.taxAmount,
+              description: 'ภาษีซื้อจาก ภ.พ.36',
+            },
+            {
+              accountCode: ACCOUNTS.CASH.code,
+              accountName: ACCOUNTS.CASH.name,
+              credit: obligation.taxAmount,
+              description: 'นำส่ง ภ.พ.36',
+            },
+          ],
+        });
+        entryId = entry.id;
+
+        await this.vat.recordWithTx(tx, {
+          companyId,
+          recordType: 'INPUT',
+          sourceType: 'PP36_OBLIGATION',
+          sourceId: obligation.id,
+          documentDate: entryDate,
+          documentNumber: obligation.expenseRecord.documentNumber,
+          partnerName: vendorName,
+          partnerTaxId: null,
+          baseAmount: obligation.baseAmount,
+          vatRate: obligation.rate,
+          vatAmount: obligation.taxAmount,
+        });
+      } else {
+        // PND.54 remittance. Debit account depends on who bears the tax:
+        //   WITHHELD    → Dr WHT Payable (liability already set on the expense journal)
+        //   RECOVERABLE → Dr Other Receivable (the vendor owes it back to us)
+        //   GROSSED_UP  → Dr WHT Borne Expense (we absorb it as a cost)
+        const borneBy = obligation.expenseRecord.foreignWhtBorneBy;
+        const debit =
+          borneBy === 'RECOVERABLE'
+            ? ACCOUNTS.OTHER_RECEIVABLE_WHT
+            : borneBy === 'GROSSED_UP'
+              ? ACCOUNTS.WHT_BORNE_EXPENSE
+              : ACCOUNTS.WHT_PAYABLE;
+        const entry = await this.journal.postWithTx(tx, {
+          companyId,
+          userId,
+          entryDate,
+          description: `นำส่ง ภ.ง.ด.54 — ${vendorName} (หัก ณ ที่จ่าย ${obligation.taxAmount.toString()})`,
+          sourceType: 'ADJUSTMENT',
+          sourceId: obligation.id,
+          lines: [
+            {
+              accountCode: debit.code,
+              accountName: debit.name,
+              debit: obligation.taxAmount,
+              description: 'ภ.ง.ด.54',
+            },
+            {
+              accountCode: ACCOUNTS.CASH.code,
+              accountName: ACCOUNTS.CASH.name,
+              credit: obligation.taxAmount,
+              description: 'นำส่ง ภ.ง.ด.54',
+            },
+          ],
+        });
+        entryId = entry.id;
+
+        await tx.withholdingTaxRecord.create({
+          data: {
+            companyId,
+            recordType: 'PAYABLE',
+            sourceType: 'FOREIGN_WHT',
+            sourceId: obligation.id,
+            paidAt: entryDate,
+            partnerName: vendorName,
+            partnerTaxId: null,
+            baseAmount: obligation.baseAmount,
+            rate: obligation.rate,
+            whtAmount: obligation.taxAmount,
+            category: obligation.expenseRecord.foreignWhtType ?? 'OTHER',
+            periodYear: obligation.filePeriodYear,
+            periodMonth: obligation.filePeriodMonth,
+          },
+        });
+      }
 
       return tx.foreignTaxObligation.update({
         where: { id: obligation.id },
@@ -835,13 +954,29 @@ export class ExpenseReceiptsService {
           status: 'FILED',
           filedAt: new Date(),
           filedBy: userId,
-          journalEntryId: entry.id,
+          journalEntryId: entryId,
           note: this.blankToNull(dto.note) ?? obligation.note,
         },
       });
     });
 
     return this.obligationToDto(updated);
+  }
+
+  /**
+   * Suggest a PND.54 withholding rate from the DTA reference table. Exact
+   * country match wins; falls back to the "*" (no-DTA / Section 70) default.
+   * This is a suggestion — the accountant confirms the final rate.
+   */
+  async lookupWhtRate(country: string | undefined, incomeType: 'ROYALTY' | 'SERVICE' | 'OTHER') {
+    const c = (country ?? '').trim().toUpperCase();
+    const rows = await this.prisma.foreignWhtRate.findMany({
+      where: { incomeType, country: { in: c ? [c, '*'] : ['*'] } },
+    });
+    const picked = (c ? rows.find((r) => r.country === c) : undefined) ?? rows.find((r) => r.country === '*');
+    return picked
+      ? { country: picked.country, incomeType, rate: picked.rate.toString(), note: picked.note }
+      : null;
   }
 
   /** Next month period (rolls the year at December). month is 1-12. */
@@ -1060,6 +1195,7 @@ export class ExpenseReceiptsService {
       fxRate: receipt.fxRate.toString(),
       foreignSubtotal: receipt.foreignSubtotal?.toString() ?? null,
       reverseChargeVatRate: receipt.reverseChargeVatRate.toString(),
+      foreignWhtRate: receipt.foreignWhtRate?.toString() ?? null,
       expenseRecord: receipt.expenseRecord
         ? {
             ...receipt.expenseRecord,
@@ -1069,6 +1205,7 @@ export class ExpenseReceiptsService {
             grandTotal: receipt.expenseRecord.grandTotal.toString(),
             fxRate: receipt.expenseRecord.fxRate.toString(),
             foreignSubtotal: receipt.expenseRecord.foreignSubtotal?.toString() ?? null,
+            foreignWhtRate: receipt.expenseRecord.foreignWhtRate?.toString() ?? null,
             foreignTaxObligations: receipt.expenseRecord.foreignTaxObligations.map((o) =>
               this.obligationToDto(o),
             ),

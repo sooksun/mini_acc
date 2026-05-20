@@ -686,4 +686,102 @@ describe('ExpenseReceiptsService (integration)', () => {
       expect(accounted.expenseRecord?.foreignTaxObligations ?? []).toHaveLength(0);
     });
   });
+
+  describe('PND.54 withholding tax on foreign payments (F3)', () => {
+    it('GROSSED_UP: grossed-up base + tax; file posts Dr WHT-borne expense / Cr cash + WHT record', async () => {
+      const vendor = await makeVendor('Royalty LLC', '0000000061001');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1000',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '1000', // vendor paid full
+          paidAt: '2026-05-15',
+          category: 'ค่าลิขสิทธิ์ซอฟต์แวร์',
+          isForeign: true,
+          expenseNature: 'SERVICE',
+          usedInThailand: true,
+          currency: 'USD',
+          fxRate: '1',
+          foreignWhtType: 'ROYALTY',
+          foreignWhtBorneBy: 'GROSSED_UP',
+          foreignWhtRate: '15',
+        },
+        fakePdf('wht-gu.pdf', 'wht-gu-1'),
+      );
+      const accounted = await service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id);
+      const ob = (accounted.expenseRecord!.foreignTaxObligations ?? []).find(
+        (o) => o.kind === 'PND54_WHT',
+      )!;
+      expect(ob).toBeTruthy();
+      expect(Number(ob.baseAmount)).toBeCloseTo(1176.47, 2); // 1000 / (1 - 0.15)
+      expect(Number(ob.taxAmount)).toBeCloseTo(176.47, 2);
+      expect(ob.filePeriodMonth).toBe(6);
+
+      const filed = await service.fileObligation(env.seed.companyId, env.seed.userId, ob.id, {});
+      expect(filed.status).toBe('FILED');
+      const je = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'ADJUSTMENT', sourceId: ob.id },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(je.lines[0]!.accountCode).toBe('5920'); // WHT borne expense
+      expect(je.lines[1]!.accountCode).toBe('1110'); // cash
+      expect(je.totalDebit.equals(je.totalCredit)).toBe(true);
+
+      const wht = await env.prisma.withholdingTaxRecord.findFirstOrThrow({
+        where: { sourceType: 'FOREIGN_WHT', sourceId: ob.id },
+      });
+      expect(wht.recordType).toBe('PAYABLE');
+      expect(Number(wht.whtAmount)).toBeCloseTo(176.47, 2);
+      expect(wht.periodMonth).toBe(6);
+    });
+
+    it('WITHHELD: tax equals amount withheld; file posts Dr WHT payable / Cr cash', async () => {
+      const vendor = await makeVendor('Withhold Co', '0000000061002');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1000',
+          vatAmount: '0',
+          withholdingTaxAmount: '50', // withheld from vendor
+          grandTotal: '950', // 1000 - 50
+          paidAt: '2026-05-15',
+          isForeign: true,
+          expenseNature: 'SERVICE',
+          usedInThailand: true,
+          currency: 'USD',
+          fxRate: '1',
+          foreignWhtType: 'SERVICE',
+          foreignWhtBorneBy: 'WITHHELD',
+          foreignWhtRate: '5',
+        },
+        fakePdf('wht-wh.pdf', 'wht-wh-1'),
+      );
+      const accounted = await service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id);
+      const ob = (accounted.expenseRecord!.foreignTaxObligations ?? []).find(
+        (o) => o.kind === 'PND54_WHT',
+      )!;
+      expect(Number(ob.taxAmount)).toBeCloseTo(50, 2); // = withholdingTaxAmount
+
+      await service.fileObligation(env.seed.companyId, env.seed.userId, ob.id, {});
+      const je = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'ADJUSTMENT', sourceId: ob.id },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(je.lines[0]!.accountCode).toBe('2152'); // WHT payable (cleared on remittance)
+      expect(je.lines[1]!.accountCode).toBe('1110');
+    });
+
+    it('lookupWhtRate: exact US royalty 5%, falls back to "*" default 15%', async () => {
+      const us = await service.lookupWhtRate('US', 'ROYALTY');
+      expect(us?.rate).toBe('5');
+      const fallback = await service.lookupWhtRate('ZZ', 'ROYALTY');
+      expect(fallback?.rate).toBe('15');
+    });
+  });
 });

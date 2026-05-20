@@ -48,6 +48,15 @@ export class ExpenseReceiptsController {
     return this.expenseReceipts.listObligations(user.companyId, dto);
   }
 
+  // Suggest a PND.54 withholding rate from the DTA reference table.
+  @Get('foreign-wht-rate')
+  lookupWhtRate(
+    @Query('country') country?: string,
+    @Query('incomeType') incomeType?: 'ROYALTY' | 'SERVICE' | 'OTHER',
+  ) {
+    return this.expenseReceipts.lookupWhtRate(country, incomeType ?? 'OTHER');
+  }
+
   @Get(':id')
   get(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.expenseReceipts.findOne(user.companyId, id);

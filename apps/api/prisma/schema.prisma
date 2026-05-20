@@ -170,6 +170,18 @@ enum ForeignTaxStatus {
   CREDITED
 }
 
+enum ForeignWhtType {
+  ROYALTY
+  SERVICE
+  OTHER
+}
+
+enum ForeignWhtBorneBy {
+  WITHHELD // หักจากเงินที่จ่ายผู้ขาย (ผู้ขายได้ยอดสุทธิ)
+  RECOVERABLE // จ่ายเต็ม แล้วเรียกคืนภาษีจากผู้ขาย (ลูกหนี้อื่น)
+  GROSSED_UP // กิจการรับภาระภาษีเอง (gross-up ฐาน = สุทธิ/(1-rate))
+}
+
 enum RiskLevel {
   LOW
   MEDIUM
@@ -590,6 +602,11 @@ model ExpenseReceipt {
   reverseChargeVatRate Decimal        @default(7) @db.Decimal(5, 2)
   dtaCountry           String?        @db.VarChar(2)
 
+  // PND.54 — withholding tax on payments abroad (set when WHT applies).
+  foreignWhtType    ForeignWhtType?
+  foreignWhtBorneBy ForeignWhtBorneBy?
+  foreignWhtRate    Decimal?           @db.Decimal(5, 2)
+
   originalFileName String  @db.VarChar(300)
   storedPath       String  @db.VarChar(500)
   mimeType         String  @db.VarChar(100)
@@ -639,6 +656,9 @@ model ExpenseRecord {
   currency        String         @default("THB") @db.VarChar(3)
   fxRate          Decimal        @default(1) @db.Decimal(18, 6)
   foreignSubtotal Decimal?       @db.Decimal(18, 2)
+  foreignWhtType    ForeignWhtType?
+  foreignWhtBorneBy ForeignWhtBorneBy?
+  foreignWhtRate    Decimal?           @db.Decimal(5, 2)
 
   recordedBy String?
   recordedAt DateTime @default(now())
@@ -696,6 +716,19 @@ model ForeignTaxObligation {
   @@index([companyId, kind, status])
   @@index([companyId, filePeriodYear, filePeriodMonth])
   @@index([expenseRecordId])
+}
+
+/// DTA withholding-rate reference for PND.54 (a suggestion, not authority —
+/// the accountant confirms). country = ISO-2, or "*" for the no-DTA / Section 70
+/// default. Seeded with a few common rows; editable as a config table.
+model ForeignWhtRate {
+  id         String         @id @default(cuid())
+  country    String         @db.VarChar(2)
+  incomeType ForeignWhtType
+  rate       Decimal        @db.Decimal(5, 2)
+  note       String?        @db.VarChar(200)
+
+  @@unique([country, incomeType])
 }
 
 model GeneratedPdf {

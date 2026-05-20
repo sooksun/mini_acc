@@ -151,4 +151,23 @@ export class UploadExpenseReceiptDto {
   @Transform(toUpper)
   @Matches(COUNTRY, { message: 'dtaCountry ต้องเป็นรหัสประเทศ 2 ตัวอักษร เช่น US' })
   dtaCountry?: string;
+
+  // ---- PND.54 withholding tax on foreign payments ------------------------
+  @IsOptional()
+  @Transform(toUpper)
+  @IsIn(['ROYALTY', 'SERVICE', 'OTHER'], { message: 'foreignWhtType ต้องเป็น ROYALTY/SERVICE/OTHER' })
+  foreignWhtType?: 'ROYALTY' | 'SERVICE' | 'OTHER';
+
+  @IsOptional()
+  @Transform(toUpper)
+  @IsIn(['WITHHELD', 'RECOVERABLE', 'GROSSED_UP'], {
+    message: 'foreignWhtBorneBy ต้องเป็น WITHHELD/RECOVERABLE/GROSSED_UP',
+  })
+  foreignWhtBorneBy?: 'WITHHELD' | 'RECOVERABLE' | 'GROSSED_UP';
+
+  @IsOptional()
+  @Transform(stripMoneySeparators)
+  @IsString()
+  @Matches(PERCENT, { message: 'foreignWhtRate ต้องเป็นอัตราภาษี เช่น 5' })
+  foreignWhtRate?: string;
 }
