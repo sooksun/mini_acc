@@ -33,6 +33,7 @@ export class PartnersService {
         email: dto.email,
         website: dto.website,
         note: dto.note,
+        defaultWhtRate: dto.defaultWhtRate,
         contacts:
           dto.contacts && dto.contacts.length > 0
             ? {
@@ -117,6 +118,7 @@ export class PartnersService {
           email: dto.email,
           website: dto.website,
           note: dto.note,
+          defaultWhtRate: dto.defaultWhtRate,
           isActive: dto.isActive,
         },
       });

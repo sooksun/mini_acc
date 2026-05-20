@@ -146,15 +146,19 @@ export function SalesDocumentForm({
   // Rules: SERVICE items → 3%, goods only → 0%.
   // Only applies when the current rate is the "standard" 0% or 3% — custom rates are left alone.
   // Skips the first render so existing documents keep their saved whtRate.
+  // The customer's configured defaultWhtRate takes priority: when the selected
+  // customer has one set, the SERVICE-based suggestion never overrides it
+  // (the rate is applied in applyCustomer instead).
   useEffect(() => {
     if (isFirstItemsRender.current) {
       isFirstItemsRender.current = false;
       return;
     }
+    if (customer?.defaultWhtRate != null && customer.defaultWhtRate !== '') return;
     const hasService = items.some((it) => it.productType === 'SERVICE');
     const suggested = hasService ? 3 : 0;
     setWhtRate((prev) => (prev === 0 || prev === 3 ? suggested : prev));
-  }, [items]);
+  }, [items, customer]);
 
   const totals = useMemo(() => computeTotals(items, vatRate, whtRate), [items, vatRate, whtRate]);
 
@@ -183,6 +187,14 @@ export function SalesDocumentForm({
       unitPrice: Number(p.unitPrice),
       vatable: p.vatable,
     });
+  }
+  function applyCustomer(c: any) {
+    setCustomer(c);
+    // The customer's configured default WHT takes priority over the
+    // SERVICE-based auto-suggestion. Apply it immediately on selection.
+    if (c?.defaultWhtRate != null && c.defaultWhtRate !== '') {
+      setWhtRate(Number(c.defaultWhtRate));
+    }
   }
 
   async function onSubmit(e: FormEvent) {
@@ -312,7 +324,7 @@ export function SalesDocumentForm({
                   <PartnerPicker
                     type="CUSTOMER"
                     value={customer}
-                    onChange={setCustomer}
+                    onChange={applyCustomer}
                     requireTaxId={meta.requireCustomerTaxId}
                   />
                   {customer?.taxId && (

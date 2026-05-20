@@ -28,6 +28,7 @@ interface FormState {
   email: string;
   website: string;
   note: string;
+  defaultWhtRate: string;
   contacts: ContactInput[];
   isActive: boolean;
 }
@@ -37,6 +38,7 @@ const empty = (defaultType: PartnerType): FormState => ({
   vendorCategory: '',
   code: '', nameTh: '', nameEn: '', taxId: '', branch: '',
   address: '', phone: '', email: '', website: '', note: '',
+  defaultWhtRate: '',
   contacts: [],
   isActive: true,
 });
@@ -79,6 +81,7 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
           email: p.email ?? '',
           website: p.website ?? '',
           note: p.note ?? '',
+          defaultWhtRate: p.defaultWhtRate != null ? String(p.defaultWhtRate) : '',
           contacts: (p.contacts ?? []).map((c: any) => ({
             name: c.name,
             position: c.position ?? '',
@@ -110,6 +113,7 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
       email: form.email || undefined,
       website: form.website || undefined,
       note: form.note || undefined,
+      defaultWhtRate: form.defaultWhtRate !== '' ? Number(form.defaultWhtRate) : undefined,
       contacts: form.contacts.map((c) => ({
         name: c.name,
         position: c.position || undefined,
@@ -247,6 +251,25 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={inputCls} maxLength={120} />
             </Field>
           </div>
+
+          {(form.type === 'CUSTOMER' || form.type === 'BOTH') && (
+            <Field label="WHT % เริ่มต้น (อัตโนมัติ)">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                inputMode="decimal"
+                placeholder="เช่น 3"
+                value={form.defaultWhtRate}
+                onChange={(e) => setForm({ ...form, defaultWhtRate: e.target.value })}
+                className={`${inputCls} max-w-[160px] font-mono`}
+              />
+              <span className="mt-1 block text-[11px] text-text-mute">
+                อัตราหัก ณ ที่จ่ายเริ่มต้นของลูกค้ารายนี้ — เว้นว่าง = ไม่กำหนด ระบบจะเติมให้อัตโนมัติเมื่อออกเอกสารขาย
+              </span>
+            </Field>
+          )}
 
           <div className="mt-2">
             <div className="mb-1 flex items-center justify-between">

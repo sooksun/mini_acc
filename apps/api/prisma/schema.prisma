@@ -370,6 +370,7 @@ model Partner {
   email          String?         @db.VarChar(120)
   website        String?         @db.VarChar(200)
   note           String?         @db.Text
+  defaultWhtRate Decimal?        @db.Decimal(5, 2)
   isActive       Boolean         @default(true)
 
   company                 Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)

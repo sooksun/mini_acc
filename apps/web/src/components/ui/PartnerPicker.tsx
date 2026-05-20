@@ -12,6 +12,7 @@ interface Partner {
   taxId: string | null;
   type: PartnerType;
   address: string | null;
+  defaultWhtRate?: string | null;
 }
 
 interface PartnerPickerProps {

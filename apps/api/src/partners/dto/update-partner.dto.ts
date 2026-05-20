@@ -5,9 +5,12 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { PartnerType, VendorCategory } from '@hj/shared-types';
@@ -50,6 +53,12 @@ export class UpdatePartnerDto {
 
   @IsOptional() @IsString() @MaxLength(2000)
   note?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  defaultWhtRate?: number;
 
   @IsOptional() @IsBoolean()
   isActive?: boolean;
