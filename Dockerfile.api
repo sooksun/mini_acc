@@ -32,9 +32,11 @@ RUN pnpm --filter @hj/api deploy --prod /out
 # (`.prisma/client/`) across the symlink boundary — at runtime
 # `Prisma.Decimal` ends up undefined and the app crashes on startup.
 # Copy the schema in and regenerate inside /out so the deployed bundle
-# is complete and self-contained.
+# is complete and self-contained. Use the locally-installed prisma CLI
+# (now a prod dep, see apps/api/package.json) instead of `npx --yes` so
+# the build doesn't have to download prisma over the network.
 RUN mkdir -p /out/prisma && cp -r /repo/apps/api/prisma/. /out/prisma/
-RUN cd /out && npx --yes prisma@5.22.0 generate --schema=./prisma/schema.prisma
+RUN cd /out && ./node_modules/.bin/prisma generate --schema=./prisma/schema.prisma
 
 # ============================================================
 # Stage 2: runner — Playwright base + Thai fonts

@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `expenserecord` ADD COLUMN `projectId` VARCHAR(191) NULL;
+ALTER TABLE `ExpenseRecord` ADD COLUMN `projectId` VARCHAR(191) NULL;
 
 -- CreateTable
 CREATE TABLE `Project` (
