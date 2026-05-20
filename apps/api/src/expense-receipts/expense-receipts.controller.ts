@@ -26,6 +26,8 @@ import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
+import { ListForeignTaxObligationsDto } from './dto/list-foreign-tax-obligations.dto';
+import { FileForeignTaxObligationDto } from './dto/file-foreign-tax-obligation.dto';
 
 // H8: read MAX_UPLOAD_MB from env so .env.example and FileInterceptor agree.
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024;
@@ -38,6 +40,12 @@ export class ExpenseReceiptsController {
   @Get()
   list(@CurrentUser() user: AuthUser, @Query() dto: ListExpenseReceiptsDto) {
     return this.expenseReceipts.list(user.companyId, dto);
+  }
+
+  // Must be declared before @Get(':id') so "pp36" isn't captured as an id.
+  @Get('pp36')
+  listObligations(@CurrentUser() user: AuthUser, @Query() dto: ListForeignTaxObligationsDto) {
+    return this.expenseReceipts.listObligations(user.companyId, dto);
   }
 
   @Get(':id')
@@ -138,6 +146,25 @@ export class ExpenseReceiptsController {
   })
   account(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.expenseReceipts.account(user.companyId, user.id, user.role, id);
+  }
+
+  @Post('pp36/:id/file')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @AuditAction('FILE_FOREIGN_TAX_OBLIGATION', {
+    entityType: 'ForeignTaxObligation',
+    getEntityId: (req) => req.params['id'] as string,
+    getMetadata: (_req, res) => ({
+      status: res?.status,
+      taxAmount: res?.taxAmount,
+      journalEntryId: res?.journalEntryId,
+    }),
+  })
+  fileObligation(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: FileForeignTaxObligationDto,
+  ) {
+    return this.expenseReceipts.fileObligation(user.companyId, user.id, id, dto);
   }
 
   @Patch(':id')

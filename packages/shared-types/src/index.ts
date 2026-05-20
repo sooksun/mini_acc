@@ -82,6 +82,28 @@ export const ExpenseRecordStatus = {
 } as const;
 export type ExpenseRecordStatus = (typeof ExpenseRecordStatus)[keyof typeof ExpenseRecordStatus];
 
+/** สินค้า vs บริการ — ใช้แยกภาระภาษีรายจ่ายต่างประเทศ (สินค้า=ศุลกากร, บริการ=ภ.พ.36) */
+export const ExpenseNature = {
+  GOODS: 'GOODS',
+  SERVICE: 'SERVICE',
+} as const;
+export type ExpenseNature = (typeof ExpenseNature)[keyof typeof ExpenseNature];
+
+/** ประเภทภาระภาษีจ่ายต่างประเทศที่ผูกกับรายจ่าย */
+export const ForeignTaxKind = {
+  PP36_VAT: 'PP36_VAT', // ภ.พ.36 — VAT 7% นำส่งแทนผู้ขายต่างประเทศ
+  PND54_WHT: 'PND54_WHT', // ภ.ง.ด.54 — หัก ณ ที่จ่าย (เฟส F3)
+} as const;
+export type ForeignTaxKind = (typeof ForeignTaxKind)[keyof typeof ForeignTaxKind];
+
+/** สถานะการนำส่งภาระภาษีต่างประเทศ */
+export const ForeignTaxStatus = {
+  PENDING: 'PENDING', // ตั้งยอดแล้ว รอยื่น/นำส่ง
+  FILED: 'FILED', // ยื่น/นำส่งแล้ว (ลง journal + VatRecord แล้ว)
+  CREDITED: 'CREDITED', // เครดิตภาษีซื้อใน ภ.พ.30 แล้ว
+} as const;
+export type ForeignTaxStatus = (typeof ForeignTaxStatus)[keyof typeof ForeignTaxStatus];
+
 export const PaymentDirection = {
   IN: 'IN',
   OUT: 'OUT',
@@ -251,6 +273,7 @@ export const AuditAction = {
   APPROVE_EXPENSE_VENDOR: 'APPROVE_EXPENSE_VENDOR',
   RECORD_EXPENSE: 'RECORD_EXPENSE',
   REJECT_EXPENSE_RECEIPT: 'REJECT_EXPENSE_RECEIPT',
+  FILE_FOREIGN_TAX_OBLIGATION: 'FILE_FOREIGN_TAX_OBLIGATION',
   CREATE_JOURNAL: 'CREATE_JOURNAL',
   VOID_JOURNAL: 'VOID_JOURNAL',
   CREATE_PAYMENT: 'CREATE_PAYMENT',

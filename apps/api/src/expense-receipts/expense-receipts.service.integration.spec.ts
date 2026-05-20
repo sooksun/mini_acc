@@ -531,4 +531,159 @@ describe('ExpenseReceiptsService (integration)', () => {
       expect(result.vendor?.taxId).toBe('0000000012121');
     });
   });
+
+  describe('foreign expense + PP.36 reverse-charge VAT (F1+F2)', () => {
+    it('foreign SERVICE used in TH: VAT=0 reconciles, accounts, creates a PENDING PP.36 obligation', async () => {
+      const vendor = await makeVendor('Anysphere, Inc.', '0000000060001');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          // UI computes THB = 106.65 × 36 = 3839.40; VAT=0 (foreign vendor)
+          subtotal: '3839.40',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '3839.40',
+          paidAt: '2026-05-10',
+          category: 'ค่าซอฟต์แวร์',
+          isForeign: true,
+          expenseNature: 'SERVICE',
+          usedInThailand: true,
+          currency: 'USD',
+          fxRate: '36',
+          foreignSubtotal: '106.65',
+          reverseChargeVat: true,
+          reverseChargeVatRate: '7',
+          dtaCountry: 'US',
+        },
+        fakePdf('pp36.pdf', 'pp36-1'),
+      );
+
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      expect(accounted.status).toBe('ACCOUNTED');
+
+      // The expense journal itself stays VAT-free: Dr Expense 3839.40 / Cr Cash 3839.40
+      const expenseJournal = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'EXPENSE_RECORD', sourceId: accounted.expenseRecord!.id },
+        include: { lines: true },
+      });
+      expect(expenseJournal.lines).toHaveLength(2);
+
+      const obligations = accounted.expenseRecord?.foreignTaxObligations ?? [];
+      expect(obligations).toHaveLength(1);
+      const o = obligations[0]!;
+      expect(o.kind).toBe('PP36_VAT');
+      expect(o.status).toBe('PENDING');
+      expect(Number(o.baseAmount)).toBeCloseTo(3839.4, 2);
+      expect(Number(o.taxAmount)).toBeCloseTo(268.76, 2); // 3839.40 × 7%
+      expect(o.expensePeriodYear).toBe(2026);
+      expect(o.expensePeriodMonth).toBe(5);
+      expect(o.filePeriodYear).toBe(2026);
+      expect(o.filePeriodMonth).toBe(6); // due the month after the expense
+    });
+
+    it('filing a PP.36 obligation posts Dr Input VAT / Cr Cash and a VatRecord(INPUT) in the file period', async () => {
+      const vendor = await makeVendor('Xlinesoft LLC', '0000000060002');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1000',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '1000',
+          paidAt: '2026-05-20',
+          category: 'ค่าซอฟต์แวร์',
+          isForeign: true,
+          expenseNature: 'SERVICE',
+          usedInThailand: true,
+          currency: 'USD',
+          fxRate: '1',
+          reverseChargeVat: true,
+        },
+        fakePdf('pp36-file.pdf', 'pp36-file-1'),
+      );
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      const obligationId = accounted.expenseRecord!.foreignTaxObligations![0]!.id;
+
+      const filed = await service.fileObligation(
+        env.seed.companyId,
+        env.seed.userId,
+        obligationId,
+        {},
+      );
+      expect(filed.status).toBe('FILED');
+      expect(filed.journalEntryId).toBeTruthy();
+
+      // Journal: Dr Input VAT 70 / Cr Cash 70, balanced, posted in the file period (Jun 2026)
+      const je = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'ADJUSTMENT', sourceId: obligationId },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(je.lines).toHaveLength(2);
+      expect(je.lines[0]!.accountCode).toBe('1151'); // Input VAT
+      expect(Number(je.lines[0]!.debit)).toBeCloseTo(70, 2);
+      expect(je.lines[1]!.accountCode).toBe('1110'); // Cash
+      expect(Number(je.lines[1]!.credit)).toBeCloseTo(70, 2);
+      expect(je.totalDebit.equals(je.totalCredit)).toBe(true);
+      expect(je.periodYear).toBe(2026);
+      expect(je.periodMonth).toBe(6);
+
+      // VatRecord(INPUT) snapshot lands in the file period → flows into PP.30
+      const vat = await env.prisma.vatRecord.findFirstOrThrow({
+        where: { sourceType: 'PP36_OBLIGATION', sourceId: obligationId },
+      });
+      expect(vat.recordType).toBe('INPUT');
+      expect(vat.periodYear).toBe(2026);
+      expect(vat.periodMonth).toBe(6);
+      expect(Number(vat.vatAmount)).toBeCloseTo(70, 2);
+
+      // Idempotent: filing again is refused
+      await expect(
+        service.fileObligation(env.seed.companyId, env.seed.userId, obligationId, {}),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'OBLIGATION_ALREADY_FILED' }),
+      });
+    });
+
+    it('foreign GOODS does not create a PP.36 obligation (VAT is settled at customs)', async () => {
+      const vendor = await makeVendor('Hardware Importer GmbH', '0000000060003');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '5000',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '5000',
+          paidAt: '2026-05-10',
+          isForeign: true,
+          expenseNature: 'GOODS',
+          usedInThailand: true,
+          reverseChargeVat: true, // even if checked, goods are excluded
+        },
+        fakePdf('pp36-goods.pdf', 'pp36-goods-1'),
+      );
+      const accounted = await service.account(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        receipt.id,
+      );
+      expect(accounted.expenseRecord?.foreignTaxObligations ?? []).toHaveLength(0);
+    });
+  });
 });

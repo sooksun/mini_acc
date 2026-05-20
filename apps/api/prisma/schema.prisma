@@ -154,6 +154,22 @@ enum WhtRecordType {
   RECEIVABLE
 }
 
+enum ExpenseNature {
+  GOODS
+  SERVICE
+}
+
+enum ForeignTaxKind {
+  PP36_VAT
+  PND54_WHT
+}
+
+enum ForeignTaxStatus {
+  PENDING
+  FILED
+  CREDITED
+}
+
 enum RiskLevel {
   LOW
   MEDIUM
@@ -263,6 +279,7 @@ model Company {
   inventoryMovements InventoryMovement[]
   fixedAssets        FixedAsset[]
   bankStatementLines BankStatementLine[]
+  foreignTaxObligations ForeignTaxObligation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -560,6 +577,19 @@ model ExpenseReceipt {
   withholdingTaxAmount Decimal @default(0) @db.Decimal(18, 2)
   grandTotal           Decimal @default(0) @db.Decimal(18, 2)
 
+  // Foreign expense (PP.36 / PND.54). Domestic rows keep defaults.
+  // subtotal/vatAmount/grandTotal stay THB; the fields below add the original
+  // currency, the FX rate used, and the self-assessed VAT (PP.36) intent.
+  isForeign            Boolean        @default(false)
+  expenseNature        ExpenseNature?
+  usedInThailand       Boolean        @default(true)
+  currency             String         @default("THB") @db.VarChar(3)
+  fxRate               Decimal        @default(1) @db.Decimal(18, 6)
+  foreignSubtotal      Decimal?       @db.Decimal(18, 2)
+  reverseChargeVat     Boolean        @default(false)
+  reverseChargeVatRate Decimal        @default(7) @db.Decimal(5, 2)
+  dtaCountry           String?        @db.VarChar(2)
+
   originalFileName String  @db.VarChar(300)
   storedPath       String  @db.VarChar(500)
   mimeType         String  @db.VarChar(100)
@@ -603,6 +633,13 @@ model ExpenseRecord {
   withholdingTaxAmount Decimal @default(0) @db.Decimal(18, 2)
   grandTotal           Decimal @default(0) @db.Decimal(18, 2)
 
+  // Foreign expense snapshot (denormalized from the receipt at account time).
+  isForeign       Boolean        @default(false)
+  expenseNature   ExpenseNature?
+  currency        String         @default("THB") @db.VarChar(3)
+  fxRate          Decimal        @default(1) @db.Decimal(18, 6)
+  foreignSubtotal Decimal?       @db.Decimal(18, 2)
+
   recordedBy String?
   recordedAt DateTime @default(now())
 
@@ -611,6 +648,7 @@ model ExpenseRecord {
   vendor     Partner        @relation("ExpenseRecordVendor", fields: [vendorId], references: [id])
   project    Project?       @relation("ProjectExpenses", fields: [projectId], references: [id])
   fixedAsset FixedAsset?    @relation("ExpenseRecordFixedAsset")
+  foreignTaxObligations ForeignTaxObligation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -618,6 +656,46 @@ model ExpenseRecord {
   @@index([companyId, vendorId, expenseDate])
   @@index([companyId, status, expenseDate])
   @@index([companyId, projectId])
+}
+
+/// Self-assessed foreign-payment tax tied to an accounted ExpenseRecord.
+/// PP36_VAT: 7% VAT the Thai payer must remit on a foreign service used in
+/// Thailand (reverse charge). The receipt itself stays VAT=0; this row tracks
+/// the separate obligation and, once filed, posts Dr Input VAT / Cr Cash and
+/// snapshots a VatRecord(INPUT) in the filing period so it flows into PP.30.
+/// PND54_WHT: reserved for Phase F3 (withholding tax on payments abroad).
+model ForeignTaxObligation {
+  id              String           @id @default(cuid())
+  companyId       String
+  expenseRecordId String
+  kind            ForeignTaxKind
+  status          ForeignTaxStatus @default(PENDING)
+
+  baseAmount Decimal @db.Decimal(18, 2)
+  rate       Decimal @db.Decimal(5, 2)
+  taxAmount  Decimal @db.Decimal(18, 2)
+
+  // The expense's own period vs. the period the form is due / VAT is claimable
+  // (PP.36 for month M is filed in M+1; the input VAT credits in M+1's PP.30).
+  expensePeriodYear  Int
+  expensePeriodMonth Int
+  filePeriodYear     Int
+  filePeriodMonth    Int
+
+  filedAt        DateTime?
+  filedBy        String?
+  journalEntryId String?
+  note           String?   @db.Text
+
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  expenseRecord ExpenseRecord @relation(fields: [expenseRecordId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, kind, status])
+  @@index([companyId, filePeriodYear, filePeriodMonth])
+  @@index([expenseRecordId])
 }
 
 model GeneratedPdf {

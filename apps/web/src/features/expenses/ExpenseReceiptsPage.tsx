@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from 'react';
 import type { ExpenseReceiptStatus, PartnerType } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { Empty } from '@/components/ui/Empty';
@@ -32,6 +32,30 @@ interface Partner {
   type: PartnerType;
 }
 
+interface ForeignTaxObligation {
+  id: string;
+  kind: 'PP36_VAT' | 'PND54_WHT';
+  status: 'PENDING' | 'FILED' | 'CREDITED';
+  baseAmount: string;
+  rate: string;
+  taxAmount: string;
+  expensePeriodYear: number;
+  expensePeriodMonth: number;
+  filePeriodYear: number;
+  filePeriodMonth: number;
+  filedAt: string | null;
+  journalEntryId: string | null;
+  expenseRecord?: {
+    id: string;
+    documentNumber: string | null;
+    category: string | null;
+    expenseDate: string;
+    currency: string;
+    foreignSubtotal: string | null;
+    vendor: { nameTh: string } | null;
+  } | null;
+}
+
 interface ExpenseReceipt {
   id: string;
   status: ExpenseReceiptStatus;
@@ -49,12 +73,21 @@ interface ExpenseReceipt {
   vatAmount: string;
   withholdingTaxAmount: string;
   grandTotal: string;
+  isForeign: boolean;
+  expenseNature: 'GOODS' | 'SERVICE' | null;
+  usedInThailand: boolean;
+  currency: string;
+  fxRate: string;
+  foreignSubtotal: string | null;
+  reverseChargeVat: boolean;
+  reverseChargeVatRate: string;
+  dtaCountry: string | null;
   originalFileName: string;
   mimeType: string;
   sizeBytes: number;
   rejectReason: string | null;
   createdAt: string;
-  expenseRecord: { id: string } | null;
+  expenseRecord: { id: string; foreignTaxObligations?: ForeignTaxObligation[] } | null;
 }
 
 const STATUS: Record<ExpenseReceiptStatus, { label: string; cls: string }> = {
@@ -79,7 +112,70 @@ const EMPTY_UPLOAD = {
   withholdingTaxAmount: '',
   grandTotal: '',
   note: '',
+  // Foreign expense (PP.36). Booleans stay booleans; the rest are strings.
+  isForeign: false,
+  expenseNature: '' as '' | 'GOODS' | 'SERVICE',
+  usedInThailand: true,
+  currency: '',
+  fxRate: '',
+  foreignSubtotal: '',
+  reverseChargeVat: false,
+  reverseChargeVatRate: '',
+  dtaCountry: '',
 };
+
+type ExpenseForm = typeof EMPTY_UPLOAD;
+
+// Foreign string fields that must be omitted (not sent as "") when empty —
+// the API validates enum/currency/country formats and rejects empty strings.
+const FOREIGN_SKIP_IF_EMPTY = new Set([
+  'expenseNature',
+  'dtaCountry',
+  'currency',
+  'fxRate',
+  'foreignSubtotal',
+  'reverseChargeVatRate',
+]);
+
+// All foreign-expense keys — excluded from the generic field loop so booleans
+// (incl. `false`) and skip-if-empty optionals are sent via foreignPayload().
+const FOREIGN_KEYS = new Set([
+  'isForeign',
+  'expenseNature',
+  'usedInThailand',
+  'currency',
+  'fxRate',
+  'foreignSubtotal',
+  'reverseChargeVat',
+  'reverseChargeVatRate',
+  'dtaCountry',
+]);
+
+const THAI_MONTHS_SHORT = [
+  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+];
+
+/** THB subtotal from foreign amount × fx rate, rounded to 2 dp. '' if incomplete. */
+function computeThb(foreignSubtotal: string, fxRate: string): string {
+  const fs = Number(foreignSubtotal);
+  const fx = Number(fxRate);
+  if (!foreignSubtotal || !fxRate || !Number.isFinite(fs) || !Number.isFinite(fx)) return '';
+  return (Math.round(fs * fx * 100) / 100).toFixed(2);
+}
+
+/** Build the foreign-field subset of a request payload, skipping empty optionals. */
+function foreignPayload(form: ExpenseForm): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = { isForeign: form.isForeign };
+  if (!form.isForeign) return out;
+  out.usedInThailand = form.usedInThailand;
+  out.reverseChargeVat = form.reverseChargeVat;
+  for (const key of FOREIGN_SKIP_IF_EMPTY) {
+    const value = (form as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.trim()) out[key] = value;
+  }
+  return out;
+}
 
 export function ExpenseReceiptsPage() {
   const toast = useToast();
@@ -92,6 +188,7 @@ export function ExpenseReceiptsPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [linking, setLinking] = useState<ExpenseReceipt | null>(null);
   const [editing, setEditing] = useState<ExpenseReceipt | null>(null);
+  const [pp36Open, setPp36Open] = useState(false);
 
   const role = getUser()?.role;
   const canUpload = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
@@ -191,14 +288,22 @@ export function ExpenseReceiptsPage() {
               เก็บหลักฐานรายจ่าย ตรวจผู้ขายใหม่/เก่า และบันทึกรายการจ่ายเข้ากับผู้ขาย
             </p>
           </div>
-          {canUpload && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setUploadOpen(true)}
-              className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+              onClick={() => setPp36Open(true)}
+              className="rounded-md border border-border bg-surface px-4 py-2 text-[13px] font-medium text-text-soft hover:bg-surface-3"
             >
-              + อัปโหลดใบเสร็จ
+              ภ.พ.36 นำส่ง
             </button>
-          )}
+            {canUpload && (
+              <button
+                onClick={() => setUploadOpen(true)}
+                className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+              >
+                + อัปโหลดใบเสร็จ
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -327,6 +432,8 @@ export function ExpenseReceiptsPage() {
           load();
         }}
       />
+
+      <Pp36Modal open={pp36Open} onClose={() => setPp36Open(false)} canFile={canAccount} />
     </>
   );
 }
@@ -446,6 +553,17 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
   const [form, setForm] = useState(EMPTY_UPLOAD);
   const [saving, setSaving] = useState(false);
 
+  // Foreign expenses are booked in THB: derive subtotal/grandTotal from the
+  // foreign amount × fx rate and force VAT=0 (the vendor charges no Thai VAT).
+  useEffect(() => {
+    if (!form.isForeign) return;
+    const thb = computeThb(form.foreignSubtotal, form.fxRate);
+    if (!thb) return;
+    const wht = Number(form.withholdingTaxAmount || '0') || 0;
+    setForm((v) => ({ ...v, subtotal: thb, vatAmount: '0', grandTotal: (Number(thb) - wht).toFixed(2) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.isForeign, form.foreignSubtotal, form.fxRate, form.withholdingTaxAmount]);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!file) {
@@ -458,8 +576,11 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
       const body = new FormData();
       body.set('file', file);
       Object.entries(form).forEach(([key, value]) => {
-        if (value) body.set(key, value);
+        if (FOREIGN_KEYS.has(key)) return;
+        if (typeof value !== 'string' || !value) return;
+        body.set(key, value);
       });
+      Object.entries(foreignPayload(form)).forEach(([key, value]) => body.set(key, String(value)));
       await api('/expense-receipts/upload', { method: 'POST', body });
       toast.success('อัปโหลดใบเสร็จแล้ว');
       setFile(null);
@@ -511,10 +632,11 @@ function UploadReceiptModal({ open, onClose, onUploaded }: { open: boolean; onCl
         <Field type="date" label="วันที่เอกสาร" value={form.documentDate} onChange={(documentDate) => setForm((v) => ({ ...v, documentDate }))} />
         <Field type="date" label="วันที่จ่าย" value={form.paidAt} onChange={(paidAt) => setForm((v) => ({ ...v, paidAt }))} />
         <Field label="หมวดรายจ่าย" value={form.category} onChange={(category) => setForm((v) => ({ ...v, category }))} placeholder="เช่น ค่าซอฟต์แวร์ / ค่าเดินทาง" />
-        <Field label="ยอดก่อน VAT" value={form.subtotal} onChange={(subtotal) => setForm((v) => ({ ...v, subtotal }))} />
-        <Field label="VAT" value={form.vatAmount} onChange={(vatAmount) => setForm((v) => ({ ...v, vatAmount }))} />
+        <Field label="ยอดก่อน VAT (บาท)" value={form.subtotal} onChange={(subtotal) => setForm((v) => ({ ...v, subtotal }))} disabled={form.isForeign} />
+        <Field label="VAT" value={form.vatAmount} onChange={(vatAmount) => setForm((v) => ({ ...v, vatAmount }))} disabled={form.isForeign} />
         <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
-        <Field label="ยอดสุทธิ" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} />
+        <Field label="ยอดสุทธิ (บาท)" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} disabled={form.isForeign} />
+        <ForeignExpenseSection form={form} setForm={setForm} />
         <label className="md:col-span-2">
           <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย / หมายเหตุ</span>
           <textarea
@@ -839,8 +961,27 @@ function EditReceiptModal({
       withholdingTaxAmount: receipt.withholdingTaxAmount ?? '',
       grandTotal: receipt.grandTotal ?? '',
       note: '',
+      isForeign: receipt.isForeign,
+      expenseNature: receipt.expenseNature ?? '',
+      usedInThailand: receipt.usedInThailand,
+      currency: receipt.isForeign ? receipt.currency : '',
+      fxRate: receipt.isForeign && receipt.fxRate !== '1' ? receipt.fxRate : '',
+      foreignSubtotal: receipt.foreignSubtotal ?? '',
+      reverseChargeVat: receipt.reverseChargeVat,
+      reverseChargeVatRate: receipt.isForeign ? receipt.reverseChargeVatRate : '',
+      dtaCountry: receipt.dtaCountry ?? '',
     });
   }, [receipt]);
+
+  // Mirror the upload modal: keep THB amounts in sync with foreign × fx.
+  useEffect(() => {
+    if (!form.isForeign) return;
+    const thb = computeThb(form.foreignSubtotal, form.fxRate);
+    if (!thb) return;
+    const wht = Number(form.withholdingTaxAmount || '0') || 0;
+    setForm((v) => ({ ...v, subtotal: thb, vatAmount: '0', grandTotal: (Number(thb) - wht).toFixed(2) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.isForeign, form.foreignSubtotal, form.fxRate, form.withholdingTaxAmount]);
 
   // Live reconcile preview so the operator fixes mismatches before saving —
   // the account step requires subtotal + VAT − WHT === grandTotal exactly.
@@ -862,15 +1003,17 @@ function EditReceiptModal({
       // Send all fields shown (incl. empty → clears server-side), except:
       // - note: not edited here, omit so it isn't wiped
       // - vendorTaxId: only when filled (server validates strict 13 digits)
-      const payload: Record<string, string> = {};
+      const payload: Record<string, string | boolean> = {};
       Object.entries(form).forEach(([key, value]) => {
         if (key === 'note') return;
+        if (FOREIGN_KEYS.has(key)) return; // sent via foreignPayload below
         if (key === 'vendorTaxId') {
-          if (value.trim()) payload[key] = value;
+          if (typeof value === 'string' && value.trim()) payload[key] = value;
           return;
         }
-        payload[key] = value;
+        if (typeof value === 'string') payload[key] = value;
       });
+      Object.assign(payload, foreignPayload(form));
       await api(`/expense-receipts/${receipt.id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
@@ -921,10 +1064,11 @@ function EditReceiptModal({
         <Field type="date" label="วันที่เอกสาร" value={form.documentDate} onChange={(documentDate) => setForm((v) => ({ ...v, documentDate }))} />
         <Field type="date" label="วันที่จ่าย" value={form.paidAt} onChange={(paidAt) => setForm((v) => ({ ...v, paidAt }))} />
         <Field label="หมวดรายจ่าย" value={form.category} onChange={(category) => setForm((v) => ({ ...v, category }))} placeholder="เช่น ค่าซอฟต์แวร์ / ค่าเดินทาง" />
-        <Field label="ยอดก่อน VAT" value={form.subtotal} onChange={(subtotal) => setForm((v) => ({ ...v, subtotal }))} />
-        <Field label="VAT" value={form.vatAmount} onChange={(vatAmount) => setForm((v) => ({ ...v, vatAmount }))} />
+        <Field label="ยอดก่อน VAT (บาท)" value={form.subtotal} onChange={(subtotal) => setForm((v) => ({ ...v, subtotal }))} disabled={form.isForeign} />
+        <Field label="VAT" value={form.vatAmount} onChange={(vatAmount) => setForm((v) => ({ ...v, vatAmount }))} disabled={form.isForeign} />
         <Field label="หัก ณ ที่จ่าย" value={form.withholdingTaxAmount} onChange={(withholdingTaxAmount) => setForm((v) => ({ ...v, withholdingTaxAmount }))} />
-        <Field label="ยอดสุทธิ" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} />
+        <Field label="ยอดสุทธิ (บาท)" value={form.grandTotal} onChange={(grandTotal) => setForm((v) => ({ ...v, grandTotal }))} disabled={form.isForeign} />
+        <ForeignExpenseSection form={form} setForm={setForm} />
         <label className="md:col-span-2">
           <span className="mb-1 block text-[12.5px] text-text-soft">ที่อยู่ผู้ขาย</span>
           <textarea
@@ -954,12 +1098,14 @@ function Field({
   onChange,
   type = 'text',
   placeholder,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <label>
@@ -969,8 +1115,310 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+        disabled={disabled}
+        className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand disabled:cursor-not-allowed disabled:opacity-60"
       />
     </label>
+  );
+}
+
+function ForeignExpenseSection({
+  form,
+  setForm,
+}: {
+  form: ExpenseForm;
+  setForm: Dispatch<SetStateAction<ExpenseForm>>;
+}) {
+  const thb = computeThb(form.foreignSubtotal, form.fxRate);
+  const isService = form.expenseNature === 'SERVICE';
+  const rate = form.reverseChargeVatRate || '7';
+  const pp36 =
+    isService && form.reverseChargeVat && thb
+      ? ((Number(thb) * Number(rate)) / 100).toFixed(2)
+      : '';
+
+  return (
+    <div className="md:col-span-2 rounded-lg border border-border bg-surface-2/40 p-3">
+      <label className="flex cursor-pointer items-center gap-2 text-[13px] font-medium">
+        <input
+          type="checkbox"
+          checked={form.isForeign}
+          onChange={(e) => setForm((v) => ({ ...v, isForeign: e.target.checked }))}
+        />
+        รายจ่ายต่างประเทศ (ต่างสกุลเงิน / ภ.พ.36)
+      </label>
+
+      {form.isForeign && (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label>
+            <span className="mb-1 block text-[12.5px] text-text-soft">ประเภท</span>
+            <select
+              value={form.expenseNature}
+              onChange={(e) =>
+                setForm((v) => ({ ...v, expenseNature: e.target.value as '' | 'GOODS' | 'SERVICE' }))
+              }
+              className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+            >
+              <option value="">— เลือก —</option>
+              <option value="SERVICE">บริการ / ซอฟต์แวร์ (ภ.พ.36)</option>
+              <option value="GOODS">สินค้า (VAT ที่ศุลกากร)</option>
+            </select>
+          </label>
+          <Field
+            label="สกุลเงิน (เช่น USD)"
+            value={form.currency}
+            onChange={(currency) => setForm((v) => ({ ...v, currency }))}
+            placeholder="USD"
+          />
+          <Field
+            label="อัตราแลกเปลี่ยน (บาท/หน่วย)"
+            value={form.fxRate}
+            onChange={(fxRate) => setForm((v) => ({ ...v, fxRate }))}
+            placeholder="36.50"
+          />
+          <Field
+            label={`ยอดสกุลต่างประเทศ${form.currency ? ` (${form.currency})` : ''}`}
+            value={form.foreignSubtotal}
+            onChange={(foreignSubtotal) => setForm((v) => ({ ...v, foreignSubtotal }))}
+            placeholder="106.65"
+          />
+
+          <div className="md:col-span-2 rounded-md border border-info/40 bg-info/5 px-3 py-2 text-[12px] text-text-soft">
+            ยอดบาทที่จะลงบัญชี ={' '}
+            <span className="font-mono font-medium text-text">{thb || '—'}</span> บาท — VAT
+            ในใบ = 0 (ผู้ขายต่างประเทศไม่เก็บ VAT ไทย)
+          </div>
+
+          {form.expenseNature === 'GOODS' && (
+            <div className="md:col-span-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-[12px] text-warn">
+              สินค้านำเข้า: VAT 7% เกิดที่ศุลกากร ใช้ใบขนสินค้า/ใบเสร็จกรมศุลกากรเป็นภาษีซื้อแยก —
+              ระบบไม่ตั้ง ภ.พ.36 ให้
+            </div>
+          )}
+
+          {isService && (
+            <>
+              <label className="flex items-center gap-2 text-[12.5px] text-text-soft md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={form.usedInThailand}
+                  onChange={(e) => setForm((v) => ({ ...v, usedInThailand: e.target.checked }))}
+                />
+                บริการนี้ใช้ในประเทศไทย (เข้าเงื่อนไข ภ.พ.36)
+              </label>
+              <label className="flex items-center gap-2 text-[12.5px] text-text-soft">
+                <input
+                  type="checkbox"
+                  checked={form.reverseChargeVat}
+                  onChange={(e) => setForm((v) => ({ ...v, reverseChargeVat: e.target.checked }))}
+                />
+                ต้องนำส่ง VAT แทน (ภ.พ.36)
+              </label>
+              <Field
+                label="อัตรา VAT ภ.พ.36 (%)"
+                value={form.reverseChargeVatRate}
+                onChange={(reverseChargeVatRate) => setForm((v) => ({ ...v, reverseChargeVatRate }))}
+                placeholder="7"
+              />
+              {pp36 && (
+                <div className="md:col-span-2 rounded-md border border-ok/40 bg-ok/5 px-3 py-2 text-[12px] text-ok">
+                  ภ.พ.36 ที่ต้องนำส่ง ≈ <span className="font-mono font-medium">{pp36}</span> บาท —
+                  ระบบจะตั้งยอดให้หลังลงรายจ่าย แล้วเครดิตภาษีซื้อเดือนถัดไป
+                </div>
+              )}
+              <Field
+                label="ประเทศคู่สัญญา (DTA, เช่น US)"
+                value={form.dtaCountry}
+                onChange={(dtaCountry) => setForm((v) => ({ ...v, dtaCountry }))}
+                placeholder="US"
+              />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function periodLabel(year: number, month: number): string {
+  return `${THAI_MONTHS_SHORT[month - 1] ?? month} ${year + 543}`;
+}
+
+function Pp36Modal({
+  open,
+  onClose,
+  canFile,
+}: {
+  open: boolean;
+  onClose: () => void;
+  canFile: boolean;
+}) {
+  const toast = useToast();
+  const [items, setItems] = useState<ForeignTaxObligation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'FILED' | ''>('PENDING');
+  const [filing, setFiling] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('kind', 'PP36_VAT');
+      if (statusFilter) params.set('status', statusFilter);
+      params.set('take', '100');
+      const res = await api<{ items: ForeignTaxObligation[]; total: number }>(
+        `/expense-receipts/pp36?${params.toString()}`,
+      );
+      setItems(res.items);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, statusFilter]);
+
+  async function file(id: string) {
+    setFiling(id);
+    try {
+      await api(`/expense-receipts/pp36/${id}/file`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      toast.success('บันทึกการนำส่ง ภ.พ.36 แล้ว — ตั้งภาษีซื้อเดือนถัดไปให้อัตโนมัติ');
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setFiling(null);
+    }
+  }
+
+  const pendingTax = items
+    .filter((i) => i.status === 'PENDING')
+    .reduce((sum, i) => sum + Number(i.taxAmount || 0), 0);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="ภ.พ.36 — VAT นำส่งแทนผู้ขายต่างประเทศ"
+      size="xl"
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-border px-4 py-2 text-[13px]"
+        >
+          ปิด
+        </button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'PENDING' | 'FILED' | '')}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:border-brand"
+          >
+            <option value="PENDING">รอนำส่ง</option>
+            <option value="FILED">นำส่งแล้ว</option>
+            <option value="">ทั้งหมด</option>
+          </select>
+          {statusFilter !== 'FILED' && (
+            <div className="text-[12.5px] text-text-soft">
+              รวมที่ต้องนำส่ง:{' '}
+              <span className="font-mono font-semibold text-text">
+                {formatThaiCurrency(pendingTax.toFixed(2))}
+              </span>{' '}
+              บาท
+            </div>
+          )}
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          <table className="w-full text-[13px]">
+            <thead className="bg-surface-2 text-left text-text-soft">
+              <tr>
+                <th className="px-3 py-2 font-medium">ผู้ขาย / เอกสาร</th>
+                <th className="px-3 py-2 font-medium">งวดรายจ่าย</th>
+                <th className="px-3 py-2 font-medium">งวดยื่น</th>
+                <th className="px-3 py-2 text-right font-medium">ฐาน (บาท)</th>
+                <th className="px-3 py-2 text-right font-medium">VAT 7%</th>
+                <th className="px-3 py-2 text-right font-medium">สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8 text-center">
+                    <Spinner />
+                  </td>
+                </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-3 py-8">
+                    <Empty
+                      title="ไม่มีรายการ ภ.พ.36"
+                      description="ลงรายจ่ายต่างประเทศ (บริการ ใช้ในไทย) ที่ติ๊ก ภ.พ.36 เพื่อให้ระบบตั้งยอดให้"
+                    />
+                  </td>
+                </tr>
+              ) : (
+                items.map((o) => (
+                  <tr key={o.id} className="border-t border-border align-top">
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{o.expenseRecord?.vendor?.nameTh ?? '—'}</div>
+                      <div className="text-[11px] text-text-mute">
+                        {o.expenseRecord?.documentNumber ?? o.expenseRecord?.category ?? ''}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-text-soft">
+                      {periodLabel(o.expensePeriodYear, o.expensePeriodMonth)}
+                    </td>
+                    <td className="px-3 py-2 text-text-soft">
+                      {periodLabel(o.filePeriodYear, o.filePeriodMonth)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{formatThaiCurrency(o.baseAmount)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{formatThaiCurrency(o.taxAmount)}</td>
+                    <td className="px-3 py-2 text-right">
+                      {o.status === 'PENDING' ? (
+                        canFile ? (
+                          <button
+                            onClick={() => file(o.id)}
+                            disabled={filing === o.id}
+                            className="rounded-md bg-brand px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+                          >
+                            {filing === o.id ? 'กำลังบันทึก…' : 'นำส่งแล้ว'}
+                          </button>
+                        ) : (
+                          <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
+                            รอนำส่ง
+                          </span>
+                        )
+                      ) : (
+                        <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
+                          นำส่งแล้ว
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="text-[11.5px] text-text-mute">
+          ภ.พ.36 ยื่นภายในวันที่ 7 (กระดาษ) / 15 (e-Filing) ของเดือนถัดไป — VAT 7% ที่นำส่งจะถูกตั้งเป็น
+          ภาษีซื้อใน ภ.พ.30 ของเดือนที่นำส่งโดยอัตโนมัติ
+        </p>
+      </div>
+    </Modal>
   );
 }

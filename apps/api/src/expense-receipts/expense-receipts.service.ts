@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
+import type { ForeignTaxObligation } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { isAbsolute, join } from 'path';
@@ -17,6 +18,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UploadExpenseReceiptDto } from './dto/upload-expense-receipt.dto';
 import { UpdateExpenseReceiptDto } from './dto/update-expense-receipt.dto';
 import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
+import { ListForeignTaxObligationsDto } from './dto/list-foreign-tax-obligations.dto';
+import { FileForeignTaxObligationDto } from './dto/file-foreign-tax-obligation.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
@@ -123,6 +126,17 @@ export class ExpenseReceiptsService {
             vatAmount: this.money(dto.vatAmount),
             withholdingTaxAmount: this.money(dto.withholdingTaxAmount),
             grandTotal: this.money(dto.grandTotal),
+            isForeign: dto.isForeign ?? false,
+            expenseNature: dto.expenseNature ?? null,
+            usedInThailand: dto.usedInThailand ?? true,
+            currency: dto.currency || 'THB',
+            fxRate: dto.fxRate ? new Prisma.Decimal(dto.fxRate) : new Prisma.Decimal(1),
+            foreignSubtotal: dto.foreignSubtotal ? new Prisma.Decimal(dto.foreignSubtotal) : null,
+            reverseChargeVat: dto.reverseChargeVat ?? false,
+            reverseChargeVatRate: dto.reverseChargeVatRate
+              ? new Prisma.Decimal(dto.reverseChargeVatRate)
+              : new Prisma.Decimal(7),
+            dtaCountry: this.blankToNull(dto.dtaCountry),
             originalFileName: file.originalname,
             storedPath: relativePath,
             mimeType: file.mimetype,
@@ -322,6 +336,30 @@ export class ExpenseReceiptsService {
             ? this.money(dto.withholdingTaxAmount)
             : undefined,
         grandTotal: dto.grandTotal !== undefined ? this.money(dto.grandTotal) : undefined,
+        isForeign: dto.isForeign !== undefined ? dto.isForeign : undefined,
+        expenseNature: dto.expenseNature !== undefined ? (dto.expenseNature ?? null) : undefined,
+        usedInThailand: dto.usedInThailand !== undefined ? dto.usedInThailand : undefined,
+        currency: dto.currency !== undefined ? dto.currency || 'THB' : undefined,
+        fxRate:
+          dto.fxRate !== undefined
+            ? dto.fxRate
+              ? new Prisma.Decimal(dto.fxRate)
+              : new Prisma.Decimal(1)
+            : undefined,
+        foreignSubtotal:
+          dto.foreignSubtotal !== undefined
+            ? dto.foreignSubtotal
+              ? new Prisma.Decimal(dto.foreignSubtotal)
+              : null
+            : undefined,
+        reverseChargeVat: dto.reverseChargeVat !== undefined ? dto.reverseChargeVat : undefined,
+        reverseChargeVatRate:
+          dto.reverseChargeVatRate !== undefined
+            ? dto.reverseChargeVatRate
+              ? new Prisma.Decimal(dto.reverseChargeVatRate)
+              : new Prisma.Decimal(7)
+            : undefined,
+        dtaCountry: dto.dtaCountry !== undefined ? this.blankToNull(dto.dtaCountry) : undefined,
       },
       include: this.include(),
     });
@@ -501,6 +539,11 @@ export class ExpenseReceiptsService {
           vatAmount: receipt.vatAmount,
           withholdingTaxAmount: receipt.withholdingTaxAmount,
           grandTotal: receipt.grandTotal,
+          isForeign: receipt.isForeign,
+          expenseNature: receipt.expenseNature,
+          currency: receipt.currency,
+          fxRate: receipt.fxRate,
+          foreignSubtotal: receipt.foreignSubtotal,
           recordedBy: userId,
         },
       });
@@ -585,6 +628,40 @@ export class ExpenseReceiptsService {
         });
       }
 
+      // PP.36 reverse-charge VAT — foreign service used in Thailand. The receipt
+      // stays VAT=0; we create a separate PENDING obligation for the 7% the payer
+      // must self-remit. Filing later posts Dr Input VAT / Cr Cash + a VatRecord.
+      // Goods are excluded (their VAT is paid at customs, evidenced separately).
+      if (
+        receipt.isForeign &&
+        receipt.expenseNature === 'SERVICE' &&
+        receipt.usedInThailand &&
+        receipt.reverseChargeVat
+      ) {
+        const taxAmount = receipt.subtotal
+          .mul(receipt.reverseChargeVatRate)
+          .div(100)
+          .toDecimalPlaces(2);
+        const ey = expenseDate.getFullYear();
+        const em = expenseDate.getMonth() + 1;
+        const file = this.nextPeriod(ey, em);
+        await tx.foreignTaxObligation.create({
+          data: {
+            companyId,
+            expenseRecordId: record.id,
+            kind: 'PP36_VAT',
+            status: 'PENDING',
+            baseAmount: receipt.subtotal,
+            rate: receipt.reverseChargeVatRate,
+            taxAmount,
+            expensePeriodYear: ey,
+            expensePeriodMonth: em,
+            filePeriodYear: file.year,
+            filePeriodMonth: file.month,
+          },
+        });
+      }
+
       return tx.expenseReceipt.update({
         where: { id },
         data: {
@@ -614,6 +691,162 @@ export class ExpenseReceiptsService {
       include: this.include(),
     });
     return this.toDto(updated);
+  }
+
+  /** List foreign-tax obligations (PP.36 / PND.54), filtered by status/kind/file period. */
+  async listObligations(companyId: string, dto: ListForeignTaxObligationsDto) {
+    const where: Prisma.ForeignTaxObligationWhereInput = {
+      companyId,
+      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.kind ? { kind: dto.kind } : {}),
+      ...(dto.year ? { filePeriodYear: dto.year } : {}),
+      ...(dto.month ? { filePeriodMonth: dto.month } : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.foreignTaxObligation.findMany({
+        where,
+        include: {
+          expenseRecord: {
+            select: {
+              id: true,
+              documentNumber: true,
+              category: true,
+              expenseDate: true,
+              currency: true,
+              foreignSubtotal: true,
+              vendor: { select: { nameTh: true } },
+            },
+          },
+        },
+        orderBy: [
+          { filePeriodYear: 'desc' },
+          { filePeriodMonth: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: dto.take ?? 100,
+        skip: dto.skip ?? 0,
+      }),
+      this.prisma.foreignTaxObligation.count({ where }),
+    ]);
+
+    return {
+      items: items.map(({ expenseRecord, ...base }) => ({
+        ...this.obligationToDto(base),
+        expenseRecord: {
+          ...expenseRecord,
+          expenseDate: expenseRecord.expenseDate.toISOString(),
+          foreignSubtotal: expenseRecord.foreignSubtotal?.toString() ?? null,
+        },
+      })),
+      total,
+    };
+  }
+
+  /**
+   * Mark a PP.36 obligation as filed + remitted. Posts Dr Input VAT / Cr Cash in
+   * the filing period and snapshots a VatRecord(INPUT) so the 7% flows into that
+   * month's PP.30 input tax. Idempotent guard: only PENDING can be filed.
+   */
+  async fileObligation(
+    companyId: string,
+    userId: string,
+    id: string,
+    dto: FileForeignTaxObligationDto,
+  ) {
+    const obligation = await this.prisma.foreignTaxObligation.findFirst({
+      where: { id, companyId },
+      include: {
+        expenseRecord: {
+          select: {
+            documentNumber: true,
+            vendor: { select: { nameTh: true } },
+          },
+        },
+      },
+    });
+    if (!obligation) throw new NotFoundException('Foreign tax obligation not found');
+    if (obligation.kind !== 'PP36_VAT') {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'UNSUPPORTED_OBLIGATION',
+        message: 'เฟสนี้รองรับเฉพาะการนำส่ง ภ.พ.36',
+      });
+    }
+    if (obligation.status !== 'PENDING') {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'OBLIGATION_ALREADY_FILED',
+        message: 'ภาระภาษีนี้นำส่งแล้ว',
+      });
+    }
+
+    // Default the journal date to the 7th of the filing period (statutory due
+    // date), at local noon so the period derives cleanly regardless of TZ.
+    const entryDate = dto.filedAt
+      ? new Date(dto.filedAt)
+      : new Date(obligation.filePeriodYear, obligation.filePeriodMonth - 1, 7, 12);
+    if (Number.isNaN(entryDate.getTime())) {
+      throw new BadRequestException('filedAt ไม่ถูกต้อง');
+    }
+
+    const vendorName = obligation.expenseRecord.vendor?.nameTh ?? 'foreign vendor';
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const entry = await this.journal.postWithTx(tx, {
+        companyId,
+        userId,
+        entryDate,
+        description: `นำส่ง ภ.พ.36 — ${vendorName} (ภาษีซื้อ ${obligation.taxAmount.toString()})`,
+        sourceType: 'ADJUSTMENT',
+        sourceId: obligation.id,
+        lines: [
+          {
+            accountCode: ACCOUNTS.INPUT_VAT.code,
+            accountName: ACCOUNTS.INPUT_VAT.name,
+            debit: obligation.taxAmount,
+            description: 'ภาษีซื้อจาก ภ.พ.36',
+          },
+          {
+            accountCode: ACCOUNTS.CASH.code,
+            accountName: ACCOUNTS.CASH.name,
+            credit: obligation.taxAmount,
+            description: 'นำส่ง ภ.พ.36',
+          },
+        ],
+      });
+
+      await this.vat.recordWithTx(tx, {
+        companyId,
+        recordType: 'INPUT',
+        sourceType: 'PP36_OBLIGATION',
+        sourceId: obligation.id,
+        documentDate: entryDate,
+        documentNumber: obligation.expenseRecord.documentNumber,
+        partnerName: vendorName,
+        partnerTaxId: null,
+        baseAmount: obligation.baseAmount,
+        vatRate: obligation.rate,
+        vatAmount: obligation.taxAmount,
+      });
+
+      return tx.foreignTaxObligation.update({
+        where: { id: obligation.id },
+        data: {
+          status: 'FILED',
+          filedAt: new Date(),
+          filedBy: userId,
+          journalEntryId: entry.id,
+          note: this.blankToNull(dto.note) ?? obligation.note,
+        },
+      });
+    });
+
+    return this.obligationToDto(updated);
+  }
+
+  /** Next month period (rolls the year at December). month is 1-12. */
+  private nextPeriod(year: number, month: number): { year: number; month: number } {
+    return month >= 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
   }
 
   async readStoredFile(companyId: string, id: string) {
@@ -811,7 +1044,9 @@ export class ExpenseReceiptsService {
           type: true,
         },
       },
-      expenseRecord: true,
+      expenseRecord: {
+        include: { foreignTaxObligations: { orderBy: { createdAt: 'asc' } } },
+      },
     } satisfies Prisma.ExpenseReceiptInclude;
   }
 
@@ -822,6 +1057,9 @@ export class ExpenseReceiptsService {
       vatAmount: receipt.vatAmount.toString(),
       withholdingTaxAmount: receipt.withholdingTaxAmount.toString(),
       grandTotal: receipt.grandTotal.toString(),
+      fxRate: receipt.fxRate.toString(),
+      foreignSubtotal: receipt.foreignSubtotal?.toString() ?? null,
+      reverseChargeVatRate: receipt.reverseChargeVatRate.toString(),
       expenseRecord: receipt.expenseRecord
         ? {
             ...receipt.expenseRecord,
@@ -829,8 +1067,25 @@ export class ExpenseReceiptsService {
             vatAmount: receipt.expenseRecord.vatAmount.toString(),
             withholdingTaxAmount: receipt.expenseRecord.withholdingTaxAmount.toString(),
             grandTotal: receipt.expenseRecord.grandTotal.toString(),
+            fxRate: receipt.expenseRecord.fxRate.toString(),
+            foreignSubtotal: receipt.expenseRecord.foreignSubtotal?.toString() ?? null,
+            foreignTaxObligations: receipt.expenseRecord.foreignTaxObligations.map((o) =>
+              this.obligationToDto(o),
+            ),
           }
         : null,
+    };
+  }
+
+  private obligationToDto(o: ForeignTaxObligation) {
+    return {
+      ...o,
+      baseAmount: o.baseAmount.toString(),
+      rate: o.rate.toString(),
+      taxAmount: o.taxAmount.toString(),
+      filedAt: o.filedAt?.toISOString() ?? null,
+      createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
     };
   }
 }
