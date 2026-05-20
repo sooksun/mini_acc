@@ -143,11 +143,13 @@ export function SalesDocumentForm({
   }, [documentDate, meta.type, mode]);
 
   // Auto-suggest WHT based on item types.
-  // Rules: SERVICE items → 3%, goods only → 0%.
-  // Only applies when the current rate is the "standard" 0% or 3% — custom rates are left alone.
+  // Rules: SERVICE → 3%, สินค้า/วัสดุ (GOOD/MATERIAL) → 1%, อื่นๆ → 0%.
+  // SERVICE wins when the document mixes types (one document-level rate).
+  // Only applies when the current rate is a system-suggested value (0/1/3) —
+  // custom rates the user typed are left alone.
   // Skips the first render so existing documents keep their saved whtRate.
   // The customer's configured defaultWhtRate takes priority: when the selected
-  // customer has one set, the SERVICE-based suggestion never overrides it
+  // customer has one set, the type-based suggestion never overrides it
   // (the rate is applied in applyCustomer instead).
   useEffect(() => {
     if (isFirstItemsRender.current) {
@@ -156,8 +158,11 @@ export function SalesDocumentForm({
     }
     if (customer?.defaultWhtRate != null && customer.defaultWhtRate !== '') return;
     const hasService = items.some((it) => it.productType === 'SERVICE');
-    const suggested = hasService ? 3 : 0;
-    setWhtRate((prev) => (prev === 0 || prev === 3 ? suggested : prev));
+    const hasGoods = items.some(
+      (it) => it.productType === 'GOOD' || it.productType === 'MATERIAL',
+    );
+    const suggested = hasService ? 3 : hasGoods ? 1 : 0;
+    setWhtRate((prev) => ([0, 1, 3].includes(prev) ? suggested : prev));
   }, [items, customer]);
 
   const totals = useMemo(() => computeTotals(items, vatRate, whtRate), [items, vatRate, whtRate]);
