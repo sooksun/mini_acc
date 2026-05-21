@@ -30,6 +30,18 @@ const FORM_LABEL: Record<PndForm, { code: string; full: string; subjects: string
     full: 'แบบยื่นรายการภาษีเงินได้หัก ณ ที่จ่าย ตามมาตรา 3 เตรส และมาตรา 69 ทวิ',
     subjects: 'สำหรับเงินได้ที่จ่ายให้ผู้รับซึ่งเป็นบริษัทหรือห้างหุ้นส่วนนิติบุคคล',
   },
+  PND54: {
+    code: 'ภ.ง.ด.54',
+    full: 'แบบยื่นรายการภาษีเงินได้หัก ณ ที่จ่าย / นำส่ง ตามมาตรา 70 (จ่ายไปต่างประเทศ)',
+    subjects: 'สำหรับเงินได้ที่จ่ายให้นิติบุคคล/บุคคลในต่างประเทศซึ่งมิได้ประกอบกิจการในไทย',
+  },
+};
+
+/** Map the stored foreign income type (PND.54 records) to a Thai label. */
+const FOREIGN_INCOME_LABEL: Record<string, string> = {
+  ROYALTY: 'ค่าสิทธิ มาตรา 40(3)',
+  SERVICE: 'ค่าบริการ/กำไรธุรกิจ',
+  OTHER: 'อื่น ๆ',
 };
 
 /**
@@ -172,7 +184,11 @@ ${(() => {
         <td class="center" style="font-family:'IBM Plex Mono',monospace;">${escapeHtml(formatTaxId(r.partnerTaxId))}</td>
         <td>${escapeHtml(r.partnerName)}</td>
         <td class="center">${escapeHtml(formatShortThaiBuddhistDate(new Date(r.paidAt)))}</td>
-        <td>${escapeHtml(r.category ?? '—')}</td>
+        <td>${escapeHtml(
+          form === 'PND54'
+            ? FOREIGN_INCOME_LABEL[r.category ?? ''] ?? r.category ?? '—'
+            : r.category ?? '—',
+        )}</td>
         <td class="center" style="font-family:'IBM Plex Mono',monospace; font-size: 7.5pt;">${escapeHtml(r.certNumber ?? '—')}</td>
         <td class="num">${formatThb(r.baseAmount.toString())}</td>
         <td class="center">${r.rate.toString()}%</td>

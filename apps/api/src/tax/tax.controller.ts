@@ -108,8 +108,8 @@ export class TaxController {
     @Res() res: Response,
   ) {
     const form = formParam.toUpperCase();
-    if (form !== 'PND3' && form !== 'PND53') {
-      throw new BadRequestException('form must be PND3 or PND53');
+    if (form !== 'PND3' && form !== 'PND53' && form !== 'PND54') {
+      throw new BadRequestException('form must be PND3, PND53 or PND54');
     }
     const { buffer, fileName } = await this.whtPdf.renderPndSummary(
       user.companyId,

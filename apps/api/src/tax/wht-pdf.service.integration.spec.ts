@@ -172,4 +172,60 @@ describe('WhtPdfService (integration)', () => {
       expect(typeof split.pnd53.base).toBe('string');
     });
   });
+
+  describe('PND54 (foreign payments)', () => {
+    it('includes only FOREIGN_WHT records and excludes them from ภ.ง.ด.3/53', async () => {
+      // A foreign WHT record (as ExpenseReceiptsService.fileObligation creates),
+      // in a fresh period 2026/09. No Thai tax ID; sourceType = FOREIGN_WHT.
+      await env.prisma.withholdingTaxRecord.create({
+        data: {
+          companyId: env.seed.companyId,
+          recordType: 'PAYABLE',
+          sourceType: 'FOREIGN_WHT',
+          sourceId: 'oblig-test-pnd54-1',
+          paidAt: new Date('2026-09-07T12:00:00+07:00'),
+          partnerName: 'Anysphere, Inc.',
+          partnerTaxId: null,
+          baseAmount: '1000',
+          rate: '5',
+          whtAmount: '50',
+          category: 'ROYALTY',
+          periodYear: 2026,
+          periodMonth: 9,
+        },
+      });
+      // A domestic juristic payment in the same period — must NOT land in PND54.
+      const vendor = await env.prisma.partner.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'VENDOR',
+          nameTh: 'นิติบุคคล Local ก.ย.',
+          taxId: '0123456780031',
+          address: 'ที่อยู่',
+        },
+      });
+      await payments.create(env.seed.companyId, env.seed.userId, {
+        direction: 'OUT',
+        partnerId: vendor.id,
+        paymentDate: '2026-09-10',
+        amount: '10000',
+        whtAmount: '300',
+        whtCategory: 'ค่าจ้างทำของ',
+      });
+
+      const pnd54 = await service.renderPndSummary(env.seed.companyId, 2026, 9, 'PND54');
+      assertPdfBuffer(pnd54.buffer);
+      expect(pnd54.recordCount).toBe(1); // only the foreign record
+      expect(pnd54.fileName).toMatch(/pnd54/);
+
+      // The foreign record is excluded from the domestic ภ.ง.ด.53 attachment.
+      const pnd53 = await service.renderPndSummary(env.seed.companyId, 2026, 9, 'PND53');
+      expect(pnd53.recordCount).toBe(1); // the domestic juristic vendor only
+
+      const split = await service.periodSplit(env.seed.companyId, 2026, 9);
+      expect(split.pnd54.count).toBe(1);
+      expect(split.pnd53.count).toBe(1);
+      expect(split.pnd3.count).toBe(0);
+    });
+  });
 });

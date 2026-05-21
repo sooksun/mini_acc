@@ -23,15 +23,17 @@ interface WhtRow {
   whtAmount: string;
   certNumber: string | null;
   category: string | null;
+  sourceType?: string | null;
 }
 
 interface PndSplitPreview {
   period: { year: number; month: number };
   pnd3: { count: number; base: string; wht: string };
   pnd53: { count: number; base: string; wht: string };
+  pnd54: { count: number; base: string; wht: string };
 }
 
-type Tab = 'PND3' | 'PND53' | 'RECEIVABLE';
+type Tab = 'PND3' | 'PND53' | 'PND54' | 'RECEIVABLE';
 
 function nowYearMonth() {
   const d = new Date();
@@ -118,7 +120,8 @@ export default function WhtCertificatesPage() {
     }
   }
 
-  async function printPndAttachment(form: 'PND3' | 'PND53') {
+  async function printPndAttachment(form: 'PND3' | 'PND53' | 'PND54') {
+    const label = form === 'PND3' ? 'ภ.ง.ด.3' : form === 'PND53' ? 'ภ.ง.ด.53' : 'ภ.ง.ด.54';
     const popup = window.open('about:blank', '_blank', 'noopener,noreferrer');
     if (!popup) {
       toast.error('เบราว์เซอร์บล็อกการเปิดไฟล์ — กรุณาอนุญาต popup');
@@ -128,15 +131,19 @@ export default function WhtCertificatesPage() {
       await openAuthedPdf(`/tax/wht/pnd-summary/${year}/${month}/${form}`, popup);
     } catch (e: any) {
       popup.close();
-      toast.error(e.message ?? `พิมพ์ใบแนบ ${form === 'PND3' ? 'ภ.ง.ด.3' : 'ภ.ง.ด.53'} ล้มเหลว`);
+      toast.error(e.message ?? `พิมพ์ใบแนบ ${label} ล้มเหลว`);
     }
   }
 
-  // Partition rows by record type + inferred PND form
+  // Partition rows by record type. Foreign payments (sourceType FOREIGN_WHT)
+  // are ภ.ง.ด.54; the rest split into ภ.ง.ด.3/53 by the Thai tax ID.
   const payable = rows.filter((r) => r.recordType === 'PAYABLE');
   const receivable = rows.filter((r) => r.recordType === 'RECEIVABLE');
-  const pnd3Rows = payable.filter((r) => inferPnd(r.partnerTaxId) === 'PND3');
-  const pnd53Rows = payable.filter((r) => inferPnd(r.partnerTaxId) === 'PND53');
+  const isForeignWht = (r: WhtRow) => r.sourceType === 'FOREIGN_WHT';
+  const pnd54Rows = payable.filter(isForeignWht);
+  const domesticPayable = payable.filter((r) => !isForeignWht(r));
+  const pnd3Rows = domesticPayable.filter((r) => inferPnd(r.partnerTaxId) === 'PND3');
+  const pnd53Rows = domesticPayable.filter((r) => inferPnd(r.partnerTaxId) === 'PND53');
 
   const totalPayable = payable.reduce((s, r) => s + Number(r.whtAmount), 0);
 
@@ -199,7 +206,14 @@ export default function WhtCertificatesPage() {
     },
   ];
 
-  const currentRows = tab === 'PND3' ? pnd3Rows : tab === 'PND53' ? pnd53Rows : receivable;
+  const currentRows =
+    tab === 'PND3'
+      ? pnd3Rows
+      : tab === 'PND53'
+        ? pnd53Rows
+        : tab === 'PND54'
+          ? pnd54Rows
+          : receivable;
   const currentColumns = tab === 'RECEIVABLE' ? receivableColumns : certColumns;
 
   return (
@@ -209,7 +223,8 @@ export default function WhtCertificatesPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">หนังสือรับรองการหักภาษี ณ ที่จ่าย</h1>
           <p className="mt-1 text-[13px] text-text-mute">
-            พิมพ์หนังสือรับรอง 50 ทวิ ให้ผู้ขาย + ใบแนบ ภ.ง.ด.3 / ภ.ง.ด.53 รายเดือนสำหรับยื่นสรรพากร
+            พิมพ์หนังสือรับรอง 50 ทวิ ให้ผู้ขาย + ใบแนบ ภ.ง.ด.3 / ภ.ง.ด.53 / ภ.ง.ด.54 (ต่างประเทศ)
+            รายเดือนสำหรับยื่นสรรพากร
           </p>
         </div>
 
@@ -242,7 +257,7 @@ export default function WhtCertificatesPage() {
           <div className="text-[12px] text-text-mute">(พ.ศ. {year + 543})</div>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-4">
+        <div className="mt-5 grid gap-3 md:grid-cols-3 lg:grid-cols-5">
           <StatCard label="รายการในงวด (PAYABLE)" value={String(payable.length)} />
           <StatCard
             label="ภาษีหักนำส่งรวม"
@@ -262,11 +277,18 @@ export default function WhtCertificatesPage() {
             tone="info"
             hint={pndSplit ? `${formatThaiCurrency(pndSplit.pnd53.wht)} บาท` : undefined}
           />
+          <StatCard
+            label="ภ.ง.ด.54 (ต่างประเทศ)"
+            value={pndSplit ? String(pndSplit.pnd54.count) : '—'}
+            tone="info"
+            hint={pndSplit ? `${formatThaiCurrency(pndSplit.pnd54.wht)} บาท` : undefined}
+          />
         </div>
 
-        {/* Two large print cards for PND attachments */}
-        {pndSplit && (pndSplit.pnd3.count > 0 || pndSplit.pnd53.count > 0) && (
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
+        {/* Large print cards for PND attachments (ภ.ง.ด.3 / 53 / 54) */}
+        {pndSplit &&
+          (pndSplit.pnd3.count > 0 || pndSplit.pnd53.count > 0 || pndSplit.pnd54.count > 0) && (
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
             <PndFilingCard
               code="ภ.ง.ด.3"
               subtitle="แบบยื่นรายการหักภาษี ณ ที่จ่าย — บุคคลธรรมดา"
@@ -287,6 +309,16 @@ export default function WhtCertificatesPage() {
               disabled={!canPrint || pndSplit.pnd53.count === 0}
               onPrint={() => printPndAttachment('PND53')}
             />
+            <PndFilingCard
+              code="ภ.ง.ด.54"
+              subtitle="แบบยื่นรายการหักภาษี ณ ที่จ่าย — จ่ายไปต่างประเทศ (ม.70)"
+              count={pndSplit.pnd54.count}
+              base={pndSplit.pnd54.base}
+              wht={pndSplit.pnd54.wht}
+              periodLabel={`${year + 543}/${String(month).padStart(2, '0')}`}
+              disabled={!canPrint || pndSplit.pnd54.count === 0}
+              onPrint={() => printPndAttachment('PND54')}
+            />
           </div>
         )}
 
@@ -295,6 +327,7 @@ export default function WhtCertificatesPage() {
             [
               { key: 'PND3', label: `ภ.ง.ด.3 (${pnd3Rows.length})` },
               { key: 'PND53', label: `ภ.ง.ด.53 (${pnd53Rows.length})` },
+              { key: 'PND54', label: `ภ.ง.ด.54 (${pnd54Rows.length})` },
               { key: 'RECEIVABLE', label: `ถูกหักไว้ (${receivable.length})` },
             ] as const
           ).map((t) => (
@@ -321,7 +354,9 @@ export default function WhtCertificatesPage() {
             emptyTitle={
               tab === 'RECEIVABLE'
                 ? 'ไม่มีรายการที่ถูกลูกค้าหักไว้ในงวดนี้'
-                : `ไม่มีรายการ ${tab === 'PND3' ? 'ภ.ง.ด.3' : 'ภ.ง.ด.53'} ในงวดนี้`
+                : `ไม่มีรายการ ${
+                    tab === 'PND3' ? 'ภ.ง.ด.3' : tab === 'PND53' ? 'ภ.ง.ด.53' : 'ภ.ง.ด.54'
+                  } ในงวดนี้`
             }
             emptyDescription="WHT records สร้างอัตโนมัติเมื่อมี payment ที่มี whtAmount > 0"
           />

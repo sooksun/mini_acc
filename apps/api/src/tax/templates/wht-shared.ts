@@ -7,7 +7,7 @@
  *   - HTML escaping
  */
 
-export type PndForm = 'PND3' | 'PND53';
+export type PndForm = 'PND3' | 'PND53' | 'PND54';
 
 /**
  * Infer PND form type from the partner's 13-digit Thai tax ID.

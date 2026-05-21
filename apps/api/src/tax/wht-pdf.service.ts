@@ -99,8 +99,14 @@ export class WhtPdfService {
       orderBy: { paidAt: 'asc' },
     });
 
-    // Filter to records that belong to the requested form
-    const records = allRecords.filter((r) => inferPndForm(r.partnerTaxId) === form);
+    // PND54 = payments abroad (sourceType FOREIGN_WHT); PND3/53 = domestic,
+    // split by the payee's Thai tax ID (foreign records excluded).
+    const records =
+      form === 'PND54'
+        ? allRecords.filter((r) => r.sourceType === 'FOREIGN_WHT')
+        : allRecords.filter(
+            (r) => r.sourceType !== 'FOREIGN_WHT' && inferPndForm(r.partnerTaxId) === form,
+          );
 
     const html = buildPndSummaryHtml({
       company,
@@ -126,11 +132,16 @@ export class WhtPdfService {
         periodYear: year,
         periodMonth: month,
       },
-      select: { partnerTaxId: true, baseAmount: true, whtAmount: true },
+      select: { partnerTaxId: true, baseAmount: true, whtAmount: true, sourceType: true },
     });
-    const split = { PND3: [] as typeof records, PND53: [] as typeof records };
+    const split = {
+      PND3: [] as typeof records,
+      PND53: [] as typeof records,
+      PND54: [] as typeof records,
+    };
     for (const r of records) {
-      split[inferPndForm(r.partnerTaxId)].push(r);
+      if (r.sourceType === 'FOREIGN_WHT') split.PND54.push(r);
+      else split[inferPndForm(r.partnerTaxId)].push(r);
     }
     const totals = (rs: typeof records) => ({
       count: rs.length,
@@ -141,6 +152,7 @@ export class WhtPdfService {
       period: { year, month },
       pnd3: totals(split.PND3),
       pnd53: totals(split.PND53),
+      pnd54: totals(split.PND54),
     };
   }
 }
