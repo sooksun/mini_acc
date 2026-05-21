@@ -1,10 +1,10 @@
 -- AlterTable
-ALTER TABLE `expensereceipt` ADD COLUMN `foreignWhtBorneBy` ENUM('WITHHELD', 'RECOVERABLE', 'GROSSED_UP') NULL,
+ALTER TABLE `ExpenseReceipt` ADD COLUMN `foreignWhtBorneBy` ENUM('WITHHELD', 'RECOVERABLE', 'GROSSED_UP') NULL,
     ADD COLUMN `foreignWhtRate` DECIMAL(5, 2) NULL,
     ADD COLUMN `foreignWhtType` ENUM('ROYALTY', 'SERVICE', 'OTHER') NULL;
 
 -- AlterTable
-ALTER TABLE `expenserecord` ADD COLUMN `foreignWhtBorneBy` ENUM('WITHHELD', 'RECOVERABLE', 'GROSSED_UP') NULL,
+ALTER TABLE `ExpenseRecord` ADD COLUMN `foreignWhtBorneBy` ENUM('WITHHELD', 'RECOVERABLE', 'GROSSED_UP') NULL,
     ADD COLUMN `foreignWhtRate` DECIMAL(5, 2) NULL,
     ADD COLUMN `foreignWhtType` ENUM('ROYALTY', 'SERVICE', 'OTHER') NULL;
 

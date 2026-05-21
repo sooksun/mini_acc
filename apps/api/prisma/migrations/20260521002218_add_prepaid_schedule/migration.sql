@@ -1,8 +1,8 @@
 -- AlterTable
-ALTER TABLE `expensereceipt` ADD COLUMN `treatAsPrepaid` BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE `ExpenseReceipt` ADD COLUMN `treatAsPrepaid` BOOLEAN NOT NULL DEFAULT false;
 
 -- AlterTable
-ALTER TABLE `expenserecord` ADD COLUMN `treatAsPrepaid` BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE `ExpenseRecord` ADD COLUMN `treatAsPrepaid` BOOLEAN NOT NULL DEFAULT false;
 
 -- CreateTable
 CREATE TABLE `PrepaidScheduleEntry` (

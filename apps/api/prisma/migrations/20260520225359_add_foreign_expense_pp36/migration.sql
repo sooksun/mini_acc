@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `expensereceipt` ADD COLUMN `currency` VARCHAR(3) NOT NULL DEFAULT 'THB',
+ALTER TABLE `ExpenseReceipt` ADD COLUMN `currency` VARCHAR(3) NOT NULL DEFAULT 'THB',
     ADD COLUMN `dtaCountry` VARCHAR(2) NULL,
     ADD COLUMN `expenseNature` ENUM('GOODS', 'SERVICE') NULL,
     ADD COLUMN `foreignSubtotal` DECIMAL(18, 2) NULL,
@@ -10,7 +10,7 @@ ALTER TABLE `expensereceipt` ADD COLUMN `currency` VARCHAR(3) NOT NULL DEFAULT '
     ADD COLUMN `usedInThailand` BOOLEAN NOT NULL DEFAULT true;
 
 -- AlterTable
-ALTER TABLE `expenserecord` ADD COLUMN `currency` VARCHAR(3) NOT NULL DEFAULT 'THB',
+ALTER TABLE `ExpenseRecord` ADD COLUMN `currency` VARCHAR(3) NOT NULL DEFAULT 'THB',
     ADD COLUMN `expenseNature` ENUM('GOODS', 'SERVICE') NULL,
     ADD COLUMN `foreignSubtotal` DECIMAL(18, 2) NULL,
     ADD COLUMN `fxRate` DECIMAL(18, 6) NOT NULL DEFAULT 1,
