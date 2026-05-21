@@ -120,6 +120,13 @@ export const ForeignWhtBorneBy = {
 } as const;
 export type ForeignWhtBorneBy = (typeof ForeignWhtBorneBy)[keyof typeof ForeignWhtBorneBy];
 
+/** สถานะการตัดค่าใช้จ่ายจ่ายล่วงหน้า (prepaid) รายเดือน */
+export const PrepaidScheduleStatus = {
+  PENDING: 'PENDING', // รอตัดเข้าค่าใช้จ่าย
+  RECOGNIZED: 'RECOGNIZED', // ตัดเข้าค่าใช้จ่าย (ลง journal) แล้ว
+} as const;
+export type PrepaidScheduleStatus = (typeof PrepaidScheduleStatus)[keyof typeof PrepaidScheduleStatus];
+
 export const PaymentDirection = {
   IN: 'IN',
   OUT: 'OUT',
@@ -290,6 +297,7 @@ export const AuditAction = {
   RECORD_EXPENSE: 'RECORD_EXPENSE',
   REJECT_EXPENSE_RECEIPT: 'REJECT_EXPENSE_RECEIPT',
   FILE_FOREIGN_TAX_OBLIGATION: 'FILE_FOREIGN_TAX_OBLIGATION',
+  RUN_PREPAID_AMORTIZATION: 'RUN_PREPAID_AMORTIZATION',
   CREATE_JOURNAL: 'CREATE_JOURNAL',
   VOID_JOURNAL: 'VOID_JOURNAL',
   CREATE_PAYMENT: 'CREATE_PAYMENT',

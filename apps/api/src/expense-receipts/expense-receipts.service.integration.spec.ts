@@ -840,4 +840,115 @@ describe('ExpenseReceiptsService (integration)', () => {
       expect(Number(fa.bookValue)).toBeCloseTo(30000, 2);
     });
   });
+
+  describe('F5 — prepaid amortization', () => {
+    it('treatAsPrepaid: account debits the prepaid asset and lays a monthly schedule summing to subtotal', async () => {
+      const vendor = await makeVendor('Cursor Anysphere', '0000000063001');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1000',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '1000',
+          paidAt: '2026-05-10',
+          category: 'ค่าซอฟต์แวร์',
+          treatAsPrepaid: true,
+          serviceStart: '2026-05-01',
+          serviceEnd: '2026-08-31', // May–Aug = 4 months
+        },
+        fakePdf('prepaid.pdf', 'prepaid-1'),
+      );
+      const accounted = await service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id);
+
+      const je = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'EXPENSE_RECORD', sourceId: accounted.expenseRecord!.id },
+        include: { lines: { orderBy: { lineNumber: 'asc' } } },
+      });
+      expect(je.lines[0]!.accountCode).toBe('1180'); // prepaid asset, not expense
+      expect(je.lines[1]!.accountCode).toBe('1110'); // cash
+
+      const schedule = await env.prisma.prepaidScheduleEntry.findMany({
+        where: { expenseRecordId: accounted.expenseRecord!.id },
+        orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }],
+      });
+      expect(schedule).toHaveLength(4);
+      expect(schedule.map((s) => s.periodMonth)).toEqual([5, 6, 7, 8]);
+      const sum = schedule.reduce((s, e) => s + Number(e.amount), 0);
+      expect(sum).toBeCloseTo(1000, 2);
+      expect(schedule.every((s) => s.status === 'PENDING')).toBe(true);
+    });
+
+    it('runPrepaid recognizes due months (Dr expense / Cr prepaid) and is idempotent', async () => {
+      const vendor = await makeVendor('SaaS Vendor', '0000000063002');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1200',
+          vatAmount: '0',
+          withholdingTaxAmount: '0',
+          grandTotal: '1200',
+          paidAt: '2026-05-10',
+          category: 'AI Tools',
+          treatAsPrepaid: true,
+          serviceStart: '2026-05-01',
+          serviceEnd: '2026-08-31',
+        },
+        fakePdf('prepaid-run.pdf', 'prepaid-run-1'),
+      );
+      const accounted = await service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id);
+      const recId = accounted.expenseRecord!.id;
+
+      // Recognize through June → May + June (2 of 4)
+      await service.runPrepaid(env.seed.companyId, env.seed.userId, { year: 2026, month: 6 });
+      const recognized = await env.prisma.prepaidScheduleEntry.findMany({
+        where: { expenseRecordId: recId, status: 'RECOGNIZED' },
+      });
+      expect(recognized).toHaveLength(2);
+
+      const je = await env.prisma.journalEntry.findFirstOrThrow({
+        where: { sourceType: 'ADJUSTMENT', sourceId: recognized[0]!.id },
+        include: { lines: true },
+      });
+      const codes = je.lines.map((l) => l.accountCode);
+      expect(codes).toContain('1180'); // Cr prepaid
+      expect(codes).toContain('5000'); // Dr expense
+      expect(je.totalDebit.equals(je.totalCredit)).toBe(true);
+
+      // Idempotent: re-running the same period recognizes nothing more
+      const before = await env.prisma.prepaidScheduleEntry.count({
+        where: { expenseRecordId: recId, status: 'RECOGNIZED' },
+      });
+      await service.runPrepaid(env.seed.companyId, env.seed.userId, { year: 2026, month: 6 });
+      const after = await env.prisma.prepaidScheduleEntry.count({
+        where: { expenseRecordId: recId, status: 'RECOGNIZED' },
+      });
+      expect(after).toBe(before);
+    });
+
+    it('treatAsPrepaid without a service window is refused at account (PREPAID_DATES_REQUIRED)', async () => {
+      const vendor = await makeVendor('NoWindow Vendor', '0000000063003');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '500',
+          grandTotal: '500',
+          paidAt: '2026-05-10',
+          treatAsPrepaid: true,
+        },
+        fakePdf('prepaid-nowin.pdf', 'prepaid-nw-1'),
+      );
+      await expect(
+        service.account(env.seed.companyId, env.seed.userId, 'OWNER', receipt.id),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'PREPAID_DATES_REQUIRED' }),
+      });
+    });
+  });
 });

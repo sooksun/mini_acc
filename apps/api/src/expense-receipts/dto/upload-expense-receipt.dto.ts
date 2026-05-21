@@ -183,6 +183,11 @@ export class UploadExpenseReceiptDto {
   treatAsIntangible?: boolean;
 
   @IsOptional()
+  @Transform(toBool)
+  @IsBoolean()
+  treatAsPrepaid?: boolean;
+
+  @IsOptional()
   @Transform(stripMoneySeparators)
   @IsString()
   @Matches(/^\d{1,3}$/, { message: 'intangibleUsefulLifeMonths ต้องเป็นจำนวนเดือน (1-3 หลัก)' })

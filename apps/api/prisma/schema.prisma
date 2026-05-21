@@ -182,6 +182,11 @@ enum ForeignWhtBorneBy {
   GROSSED_UP // กิจการรับภาระภาษีเอง (gross-up ฐาน = สุทธิ/(1-rate))
 }
 
+enum PrepaidScheduleStatus {
+  PENDING // รอตัดเข้าค่าใช้จ่าย
+  RECOGNIZED // ตัดเข้าค่าใช้จ่าย (ลง journal) แล้ว
+}
+
 enum RiskLevel {
   LOW
   MEDIUM
@@ -292,6 +297,7 @@ model Company {
   fixedAssets        FixedAsset[]
   bankStatementLines BankStatementLine[]
   foreignTaxObligations ForeignTaxObligation[]
+  prepaidScheduleEntries PrepaidScheduleEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -611,6 +617,7 @@ model ExpenseReceipt {
   billedToName               String?   @db.VarChar(200)
   billingNameMismatch        Boolean   @default(false)
   treatAsIntangible          Boolean   @default(false)
+  treatAsPrepaid             Boolean   @default(false)
   intangibleUsefulLifeMonths Int?
   serviceStart               DateTime?
   serviceEnd                 DateTime?
@@ -668,6 +675,7 @@ model ExpenseRecord {
   foreignWhtBorneBy ForeignWhtBorneBy?
   foreignWhtRate    Decimal?           @db.Decimal(5, 2)
   treatAsIntangible Boolean            @default(false)
+  treatAsPrepaid    Boolean            @default(false)
   serviceStart      DateTime?
   serviceEnd        DateTime?
 
@@ -680,6 +688,7 @@ model ExpenseRecord {
   project    Project?       @relation("ProjectExpenses", fields: [projectId], references: [id])
   fixedAsset FixedAsset?    @relation("ExpenseRecordFixedAsset")
   foreignTaxObligations ForeignTaxObligation[]
+  prepaidScheduleEntries PrepaidScheduleEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -740,6 +749,29 @@ model ForeignWhtRate {
   note       String?        @db.VarChar(200)
 
   @@unique([country, incomeType])
+}
+
+/// Straight-line monthly recognition schedule for a prepaid expense. One row
+/// per service month; `runPrepaid` posts Dr Expense / Cr Prepaid for entries
+/// due up to a given period and marks them RECOGNIZED (idempotent by status).
+model PrepaidScheduleEntry {
+  id              String                @id @default(cuid())
+  companyId       String
+  expenseRecordId String
+  periodYear      Int
+  periodMonth     Int
+  amount          Decimal               @db.Decimal(18, 2)
+  status          PrepaidScheduleStatus @default(PENDING)
+  journalEntryId  String?
+  recognizedAt    DateTime?
+
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  expenseRecord ExpenseRecord @relation(fields: [expenseRecordId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, status, periodYear, periodMonth])
+  @@index([expenseRecordId])
 }
 
 model GeneratedPdf {

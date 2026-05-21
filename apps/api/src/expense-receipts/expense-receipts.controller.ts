@@ -28,6 +28,8 @@ import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
 import { ListForeignTaxObligationsDto } from './dto/list-foreign-tax-obligations.dto';
 import { FileForeignTaxObligationDto } from './dto/file-foreign-tax-obligation.dto';
+import { ListPrepaidDto } from './dto/list-prepaid.dto';
+import { RunPrepaidDto } from './dto/run-prepaid.dto';
 
 // H8: read MAX_UPLOAD_MB from env so .env.example and FileInterceptor agree.
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024;
@@ -55,6 +57,11 @@ export class ExpenseReceiptsController {
     @Query('incomeType') incomeType?: 'ROYALTY' | 'SERVICE' | 'OTHER',
   ) {
     return this.expenseReceipts.lookupWhtRate(country, incomeType ?? 'OTHER');
+  }
+
+  @Get('prepaid')
+  listPrepaid(@CurrentUser() user: AuthUser, @Query() dto: ListPrepaidDto) {
+    return this.expenseReceipts.listPrepaid(user.companyId, dto);
   }
 
   @Get(':id')
@@ -174,6 +181,16 @@ export class ExpenseReceiptsController {
     @Body() dto: FileForeignTaxObligationDto,
   ) {
     return this.expenseReceipts.fileObligation(user.companyId, user.id, id, dto);
+  }
+
+  @Post('prepaid/run')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @AuditAction('RUN_PREPAID_AMORTIZATION', {
+    entityType: 'PrepaidScheduleEntry',
+    getMetadata: (_req, res) => ({ recognized: res?.recognized, total: res?.total }),
+  })
+  runPrepaid(@CurrentUser() user: AuthUser, @Body() dto: RunPrepaidDto) {
+    return this.expenseReceipts.runPrepaid(user.companyId, user.id, dto);
   }
 
   @Patch(':id')

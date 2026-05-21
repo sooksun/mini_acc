@@ -20,6 +20,8 @@ import { UpdateExpenseReceiptDto } from './dto/update-expense-receipt.dto';
 import { ListExpenseReceiptsDto } from './dto/list-expense-receipts.dto';
 import { ListForeignTaxObligationsDto } from './dto/list-foreign-tax-obligations.dto';
 import { FileForeignTaxObligationDto } from './dto/file-foreign-tax-obligation.dto';
+import { ListPrepaidDto } from './dto/list-prepaid.dto';
+import { RunPrepaidDto } from './dto/run-prepaid.dto';
 import { LinkExpenseVendorDto } from './dto/link-expense-vendor.dto';
 import { ApproveExpenseVendorDto } from './dto/approve-expense-vendor.dto';
 import { RejectExpenseReceiptDto } from './dto/reject-expense-receipt.dto';
@@ -145,6 +147,7 @@ export class ExpenseReceiptsService {
             billedToName: this.blankToNull(dto.billedToName),
             billingNameMismatch,
             treatAsIntangible: dto.treatAsIntangible ?? false,
+            treatAsPrepaid: dto.treatAsPrepaid ?? false,
             intangibleUsefulLifeMonths: dto.intangibleUsefulLifeMonths
               ? Number(dto.intangibleUsefulLifeMonths)
               : null,
@@ -392,6 +395,7 @@ export class ExpenseReceiptsService {
         billingNameMismatch,
         treatAsIntangible:
           dto.treatAsIntangible !== undefined ? dto.treatAsIntangible : undefined,
+        treatAsPrepaid: dto.treatAsPrepaid !== undefined ? dto.treatAsPrepaid : undefined,
         intangibleUsefulLifeMonths:
           dto.intangibleUsefulLifeMonths !== undefined
             ? dto.intangibleUsefulLifeMonths
@@ -552,6 +556,17 @@ export class ExpenseReceiptsService {
         message: 'ต้องระบุวันที่จ่ายหรือวันที่เอกสารก่อนลงรายจ่าย',
       });
     }
+    if (
+      receipt.treatAsPrepaid &&
+      !receipt.treatAsIntangible &&
+      (!receipt.serviceStart || !receipt.serviceEnd)
+    ) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'PREPAID_DATES_REQUIRED',
+        message: 'ค่าใช้จ่ายจ่ายล่วงหน้าต้องระบุช่วงบริการ (เริ่ม-สิ้นสุด) ก่อนลงบัญชี',
+      });
+    }
 
     // H3 + P3: subtotal + VAT − WHT must reconcile with grandTotal exactly.
     // We tighten to zero tolerance because the journal posting below requires
@@ -594,6 +609,7 @@ export class ExpenseReceiptsService {
           foreignWhtBorneBy: receipt.foreignWhtBorneBy,
           foreignWhtRate: receipt.foreignWhtRate,
           treatAsIntangible: receipt.treatAsIntangible,
+          treatAsPrepaid: receipt.treatAsPrepaid,
           serviceStart: receipt.serviceStart,
           serviceEnd: receipt.serviceEnd,
           recordedBy: userId,
@@ -608,10 +624,13 @@ export class ExpenseReceiptsService {
       //   Cr Cash (grandTotal — what we actually paid out)
       //   Cr WHT Payable (whtAmount, if any)
       // Balance: subtotal + vat = grandTotal + wht ← guaranteed by H3.
-      // F4 — capitalize as intangible → debit the asset, not an expense account.
+      // F4/F5 — capitalize as intangible OR defer as prepaid → debit an asset
+      // account instead of an expense; otherwise the normal category expense.
       const expenseAccount = receipt.treatAsIntangible
         ? ACCOUNTS.INTANGIBLE_ASSET
-        : expenseAccountForCategory(receipt.category);
+        : receipt.treatAsPrepaid
+          ? ACCOUNTS.PREPAID_EXPENSE
+          : expenseAccountForCategory(receipt.category);
       const lines: Parameters<typeof this.journal.postWithTx>[1]['lines'] = [
         {
           accountCode: expenseAccount.code,
@@ -672,6 +691,31 @@ export class ExpenseReceiptsService {
             bookValue: receipt.subtotal,
             expenseRecordId: record.id,
           },
+        });
+      }
+
+      // F5 — prepaid: the journal above debited the prepaid asset. Lay down a
+      // straight-line monthly recognition schedule; runPrepaid() later posts
+      // Dr Expense / Cr Prepaid for each month. Excluded from the immediate P&L.
+      if (
+        receipt.treatAsPrepaid &&
+        !receipt.treatAsIntangible &&
+        receipt.serviceStart &&
+        receipt.serviceEnd
+      ) {
+        const schedule = this.buildPrepaidSchedule(
+          receipt.serviceStart,
+          receipt.serviceEnd,
+          receipt.subtotal,
+        );
+        await tx.prepaidScheduleEntry.createMany({
+          data: schedule.map((s) => ({
+            companyId,
+            expenseRecordId: record.id,
+            periodYear: s.year,
+            periodMonth: s.month,
+            amount: s.amount,
+          })),
         });
       }
 
@@ -1046,6 +1090,136 @@ export class ExpenseReceiptsService {
   /** Next month period (rolls the year at December). month is 1-12. */
   private nextPeriod(year: number, month: number): { year: number; month: number } {
     return month >= 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
+  }
+
+  /**
+   * Straight-line monthly schedule over the inclusive [start, end] month span.
+   * The last month absorbs the rounding remainder so the sum equals `total`
+   * exactly (the prepaid asset clears to zero once fully recognized).
+   */
+  private buildPrepaidSchedule(
+    start: Date,
+    end: Date,
+    total: Prisma.Decimal,
+  ): { year: number; month: number; amount: Prisma.Decimal }[] {
+    const periods: { year: number; month: number }[] = [];
+    let y = start.getUTCFullYear();
+    let m = start.getUTCMonth() + 1;
+    const ey = end.getUTCFullYear();
+    const em = end.getUTCMonth() + 1;
+    while ((y < ey || (y === ey && m <= em)) && periods.length < 600) {
+      periods.push({ year: y, month: m });
+      if (m === 12) {
+        y += 1;
+        m = 1;
+      } else {
+        m += 1;
+      }
+    }
+    if (periods.length === 0) {
+      periods.push({ year: start.getUTCFullYear(), month: start.getUTCMonth() + 1 });
+    }
+    const n = periods.length;
+    const per = total.div(n).toDecimalPlaces(2);
+    const lastAmount = total.minus(per.mul(n - 1));
+    return periods.map((p, i) => ({ ...p, amount: i === n - 1 ? lastAmount : per }));
+  }
+
+  /**
+   * Recognize prepaid expense up to (and including) the given period. Posts
+   * Dr Expense (by category) / Cr Prepaid for each PENDING schedule entry due
+   * by then and marks it RECOGNIZED. Idempotent — recognized entries are skipped.
+   */
+  async runPrepaid(companyId: string, userId: string, dto: RunPrepaidDto) {
+    const { year, month } = dto;
+    const due = await this.prisma.prepaidScheduleEntry.findMany({
+      where: {
+        companyId,
+        status: 'PENDING',
+        OR: [{ periodYear: { lt: year } }, { periodYear: year, periodMonth: { lte: month } }],
+      },
+      include: { expenseRecord: { select: { category: true } } },
+      orderBy: [{ periodYear: 'asc' }, { periodMonth: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    let recognized = 0;
+    let total = new Prisma.Decimal(0);
+    for (const entry of due) {
+      const account = expenseAccountForCategory(entry.expenseRecord.category);
+      // Recognize at local noon on the 28th (valid in every month) so the
+      // journal period matches the schedule period regardless of timezone.
+      const entryDate = new Date(entry.periodYear, entry.periodMonth - 1, 28, 12);
+      await this.prisma.$transaction(async (tx) => {
+        const je = await this.journal.postWithTx(tx, {
+          companyId,
+          userId,
+          entryDate,
+          description:
+            `ตัดค่าใช้จ่ายล่วงหน้า ${entry.periodMonth}/${entry.periodYear}` +
+            (entry.expenseRecord.category ? ` — ${entry.expenseRecord.category}` : ''),
+          sourceType: 'ADJUSTMENT',
+          sourceId: entry.id,
+          lines: [
+            {
+              accountCode: account.code,
+              accountName: account.name,
+              debit: entry.amount,
+              description: 'ตัดค่าใช้จ่ายล่วงหน้า',
+            },
+            {
+              accountCode: ACCOUNTS.PREPAID_EXPENSE.code,
+              accountName: ACCOUNTS.PREPAID_EXPENSE.name,
+              credit: entry.amount,
+            },
+          ],
+        });
+        await tx.prepaidScheduleEntry.update({
+          where: { id: entry.id },
+          data: { status: 'RECOGNIZED', recognizedAt: new Date(), journalEntryId: je.id },
+        });
+      });
+      recognized += 1;
+      total = total.plus(entry.amount);
+    }
+    return { period: { year, month }, recognized, total: total.toString() };
+  }
+
+  /** List prepaid recognition schedule entries, filtered by status/period. */
+  async listPrepaid(companyId: string, dto: ListPrepaidDto) {
+    const where: Prisma.PrepaidScheduleEntryWhereInput = {
+      companyId,
+      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.year ? { periodYear: dto.year } : {}),
+      ...(dto.month ? { periodMonth: dto.month } : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.prepaidScheduleEntry.findMany({
+        where,
+        include: {
+          expenseRecord: {
+            select: {
+              id: true,
+              documentNumber: true,
+              category: true,
+              vendor: { select: { nameTh: true } },
+            },
+          },
+        },
+        orderBy: [{ status: 'asc' }, { periodYear: 'asc' }, { periodMonth: 'asc' }],
+        take: dto.take ?? 200,
+        skip: dto.skip ?? 0,
+      }),
+      this.prisma.prepaidScheduleEntry.count({ where }),
+    ]);
+    return {
+      items: items.map((e) => ({
+        ...e,
+        amount: e.amount.toString(),
+        recognizedAt: e.recognizedAt?.toISOString() ?? null,
+        createdAt: e.createdAt.toISOString(),
+      })),
+      total,
+    };
   }
 
   async readStoredFile(companyId: string, id: string) {

@@ -22,6 +22,7 @@ export const ACCOUNTS = {
   CASH: { code: '1110', name: 'เงินสด' },
   BANK: { code: '1120', name: 'เงินฝากธนาคาร' },
   AR: { code: '1130', name: 'ลูกหนี้การค้า' },
+  PREPAID_EXPENSE: { code: '1180', name: 'ค่าใช้จ่ายจ่ายล่วงหน้า' },
   INPUT_VAT: { code: '1151', name: 'ภาษีซื้อ' },
   WHT_RECEIVABLE: { code: '1152', name: 'ภาษีหัก ณ ที่จ่ายรอเรียกคืน' },
   OTHER_RECEIVABLE_WHT: { code: '1153', name: 'ลูกหนี้อื่น-ภาษีจ่ายแทนผู้ขายต่างประเทศ' },

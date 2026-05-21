@@ -90,6 +90,7 @@ interface ExpenseReceipt {
   billedToName: string | null;
   billingNameMismatch: boolean;
   treatAsIntangible: boolean;
+  treatAsPrepaid: boolean;
   intangibleUsefulLifeMonths: number | null;
   serviceStart: string | null;
   serviceEnd: string | null;
@@ -140,6 +141,7 @@ const EMPTY_UPLOAD = {
   // F4 — billing-name guard / capitalize / prepaid window
   billedToName: '',
   treatAsIntangible: false,
+  treatAsPrepaid: false,
   intangibleUsefulLifeMonths: '',
   serviceStart: '',
   serviceEnd: '',
@@ -176,9 +178,10 @@ const FOREIGN_KEYS = new Set([
   'foreignWhtType',
   'foreignWhtBorneBy',
   'foreignWhtRate',
-  // F4 — handled via capitalizationPayload (booleans/dates/optionals)
+  // F4/F5 — handled via capitalizationPayload (booleans/dates/optionals)
   'billedToName',
   'treatAsIntangible',
+  'treatAsPrepaid',
   'intangibleUsefulLifeMonths',
   'serviceStart',
   'serviceEnd',
@@ -215,6 +218,7 @@ function capitalizationPayload(form: ExpenseForm): Record<string, string | boole
   const out: Record<string, string | boolean> = {
     billedToName: form.billedToName,
     treatAsIntangible: form.treatAsIntangible,
+    treatAsPrepaid: form.treatAsPrepaid,
   };
   if (form.intangibleUsefulLifeMonths.trim())
     out.intangibleUsefulLifeMonths = form.intangibleUsefulLifeMonths;
@@ -235,6 +239,7 @@ export function ExpenseReceiptsPage() {
   const [linking, setLinking] = useState<ExpenseReceipt | null>(null);
   const [editing, setEditing] = useState<ExpenseReceipt | null>(null);
   const [pp36Open, setPp36Open] = useState(false);
+  const [prepaidOpen, setPrepaidOpen] = useState(false);
 
   const role = getUser()?.role;
   const canUpload = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
@@ -340,6 +345,12 @@ export function ExpenseReceiptsPage() {
               className="rounded-md border border-border bg-surface px-4 py-2 text-[13px] font-medium text-text-soft hover:bg-surface-3"
             >
               ภาษีนำส่ง (ภ.พ.36/54)
+            </button>
+            <button
+              onClick={() => setPrepaidOpen(true)}
+              className="rounded-md border border-border bg-surface px-4 py-2 text-[13px] font-medium text-text-soft hover:bg-surface-3"
+            >
+              ตัด prepaid
             </button>
             {canUpload && (
               <button
@@ -485,6 +496,7 @@ export function ExpenseReceiptsPage() {
       />
 
       <Pp36Modal open={pp36Open} onClose={() => setPp36Open(false)} canFile={canAccount} />
+      <PrepaidModal open={prepaidOpen} onClose={() => setPrepaidOpen(false)} canRun={canAccount} />
     </>
   );
 }
@@ -1030,6 +1042,7 @@ function EditReceiptModal({
       foreignWhtRate: receipt.foreignWhtRate ?? '',
       billedToName: receipt.billedToName ?? '',
       treatAsIntangible: receipt.treatAsIntangible,
+      treatAsPrepaid: receipt.treatAsPrepaid,
       intangibleUsefulLifeMonths:
         receipt.intangibleUsefulLifeMonths != null
           ? String(receipt.intangibleUsefulLifeMonths)
@@ -1443,7 +1456,13 @@ function CapitalizationFields({
           <input
             type="checkbox"
             checked={form.treatAsIntangible}
-            onChange={(e) => setForm((v) => ({ ...v, treatAsIntangible: e.target.checked }))}
+            onChange={(e) =>
+              setForm((v) => ({
+                ...v,
+                treatAsIntangible: e.target.checked,
+                treatAsPrepaid: e.target.checked ? false : v.treatAsPrepaid,
+              }))
+            }
           />
           ลงเป็นสินทรัพย์ไม่มีตัวตน (ตัดจำหน่ายแทนลงค่าใช้จ่ายทันที)
         </label>
@@ -1457,9 +1476,23 @@ function CapitalizationFields({
             placeholder="36"
           />
         )}
+        <label className="flex items-center gap-2 text-[12.5px] text-text-soft md:col-span-2">
+          <input
+            type="checkbox"
+            checked={form.treatAsPrepaid}
+            onChange={(e) =>
+              setForm((v) => ({
+                ...v,
+                treatAsPrepaid: e.target.checked,
+                treatAsIntangible: e.target.checked ? false : v.treatAsIntangible,
+              }))
+            }
+          />
+          ค่าใช้จ่ายจ่ายล่วงหน้า — ทยอยตัดรายเดือนตามช่วงบริการ (prepaid)
+        </label>
         <Field
           type="date"
-          label="ช่วงบริการ — เริ่ม (จ่ายล่วงหน้า)"
+          label="ช่วงบริการ — เริ่ม"
           value={form.serviceStart}
           onChange={(serviceStart) => setForm((v) => ({ ...v, serviceStart }))}
         />
@@ -1469,9 +1502,11 @@ function CapitalizationFields({
           value={form.serviceEnd}
           onChange={(serviceEnd) => setForm((v) => ({ ...v, serviceEnd }))}
         />
-        {form.serviceStart && form.serviceEnd && !form.treatAsIntangible && (
-          <div className="md:col-span-2 text-[11.5px] text-text-mute">
-            ช่วงบริการคร่อมเดือน — บันทึกไว้ให้นักบัญชีทยอยรับรู้ค่าใช้จ่าย (prepaid); ระบบยังลงค่าใช้จ่ายเต็มในงวดที่จ่าย
+        {form.treatAsPrepaid && (
+          <div className="md:col-span-2 rounded-md border border-info/40 bg-info/5 px-3 py-2 text-[12px] text-text-soft">
+            {form.serviceStart && form.serviceEnd
+              ? 'จะลงเป็นค่าใช้จ่ายจ่ายล่วงหน้า (สินทรัพย์) แล้วทยอยตัดเข้าค่าใช้จ่ายรายเดือนตามช่วงบริการ — กดปุ่ม “ตัด prepaid” เพื่อลงบัญชีแต่ละงวด'
+              : 'ระบุช่วงบริการ (เริ่ม-สิ้นสุด) เพื่อให้ระบบสร้างตารางตัดรายเดือน'}
           </div>
         )}
       </div>
@@ -1689,6 +1724,207 @@ function Pp36Modal({
         <p className="text-[11.5px] text-text-mute">
           ภ.พ.36 / ภ.ง.ด.54 ยื่นภายในวันที่ 7 ของเดือนถัดไป — VAT จาก ภ.พ.36 ตั้งเป็นภาษีซื้อใน ภ.พ.30
           และ ภ.ง.ด.54 บันทึกเป็น WHT (หนังสือรับรอง 50 ทวิ + รายงานออกได้ที่หน้า ภาษี VAT/WHT)
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
+interface PrepaidEntry {
+  id: string;
+  periodYear: number;
+  periodMonth: number;
+  amount: string;
+  status: 'PENDING' | 'RECOGNIZED';
+  expenseRecord?: {
+    documentNumber: string | null;
+    category: string | null;
+    vendor: { nameTh: string } | null;
+  } | null;
+}
+
+function PrepaidModal({
+  open,
+  onClose,
+  canRun,
+}: {
+  open: boolean;
+  onClose: () => void;
+  canRun: boolean;
+}) {
+  const toast = useToast();
+  const [items, setItems] = useState<PrepaidEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'RECOGNIZED' | ''>('PENDING');
+  const now = new Date();
+  const [period, setPeriod] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+  );
+  const [running, setRunning] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (statusFilter) params.set('status', statusFilter);
+      params.set('take', '300');
+      const res = await api<{ items: PrepaidEntry[]; total: number }>(
+        `/expense-receipts/prepaid?${params.toString()}`,
+      );
+      setItems(res.items);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, statusFilter]);
+
+  async function run() {
+    const [y, m] = period.split('-').map(Number);
+    if (!y || !m) {
+      toast.error('เลือกงวดก่อน');
+      return;
+    }
+    setRunning(true);
+    try {
+      const res = await api<{ recognized: number; total: string }>(`/expense-receipts/prepaid/run`, {
+        method: 'POST',
+        body: JSON.stringify({ year: y, month: m }),
+      });
+      toast.success(
+        `ตัดค่าใช้จ่ายล่วงหน้า ${res.recognized} รายการ รวม ${formatThaiCurrency(res.total)} บาท`,
+      );
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const pendingTotal = items
+    .filter((i) => i.status === 'PENDING')
+    .reduce((sum, i) => sum + Number(i.amount || 0), 0);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="ตัดค่าใช้จ่ายล่วงหน้า (prepaid) รายเดือน"
+      size="xl"
+      footer={
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-border px-4 py-2 text-[13px]"
+        >
+          ปิด
+        </button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'PENDING' | 'RECOGNIZED' | '')}
+            className="rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:border-brand"
+          >
+            <option value="PENDING">รอตัด</option>
+            <option value="RECOGNIZED">ตัดแล้ว</option>
+            <option value="">ทั้งหมด</option>
+          </select>
+          {canRun && (
+            <div className="flex items-center gap-2">
+              <input
+                type="month"
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+                className="rounded-md border border-border bg-surface px-3 py-2 text-[13px] outline-none focus:border-brand"
+              />
+              <button
+                onClick={run}
+                disabled={running}
+                className="rounded-md bg-brand px-3 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {running ? 'กำลังตัด…' : 'ตัดถึงงวดนี้'}
+              </button>
+            </div>
+          )}
+        </div>
+        {statusFilter !== 'RECOGNIZED' && (
+          <div className="text-[12.5px] text-text-soft">
+            รวมรอตัด:{' '}
+            <span className="font-mono font-semibold text-text">
+              {formatThaiCurrency(pendingTotal.toFixed(2))}
+            </span>{' '}
+            บาท
+          </div>
+        )}
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          <table className="w-full text-[13px]">
+            <thead className="bg-surface-2 text-left text-text-soft">
+              <tr>
+                <th className="px-3 py-2 font-medium">ผู้ขาย / หมวด</th>
+                <th className="px-3 py-2 font-medium">งวด</th>
+                <th className="px-3 py-2 text-right font-medium">จำนวน</th>
+                <th className="px-3 py-2 text-right font-medium">สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-8 text-center">
+                    <Spinner />
+                  </td>
+                </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-8">
+                    <Empty
+                      title="ไม่มีรายการ prepaid"
+                      description="ติ๊ก ‘ค่าใช้จ่ายจ่ายล่วงหน้า’ พร้อมช่วงบริการตอนลงรายจ่าย"
+                    />
+                  </td>
+                </tr>
+              ) : (
+                items.map((e) => (
+                  <tr key={e.id} className="border-t border-border">
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{e.expenseRecord?.vendor?.nameTh ?? '—'}</div>
+                      <div className="text-[11px] text-text-mute">
+                        {e.expenseRecord?.category ?? e.expenseRecord?.documentNumber ?? ''}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-text-soft">
+                      {periodLabel(e.periodYear, e.periodMonth)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{formatThaiCurrency(e.amount)}</td>
+                    <td className="px-3 py-2 text-right">
+                      {e.status === 'PENDING' ? (
+                        <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-[11px] text-warn">
+                          รอตัด
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-[11px] text-ok">
+                          ตัดแล้ว
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[11.5px] text-text-mute">
+          ตัด prepaid โพสต์ Dr ค่าใช้จ่าย / Cr ค่าใช้จ่ายจ่ายล่วงหน้า ในแต่ละงวด (ทำซ้ำได้ —
+          งวดที่ตัดแล้วจะไม่ถูกตัดซ้ำ)
         </p>
       </div>
     </Modal>

@@ -20,6 +20,7 @@ export interface TestEnv {
 const TABLES_FK_DEPENDENT_ORDER = [
   // Phase 2 children first (depend on Payment / JournalEntry / Project / etc.)
   'ForeignTaxObligation',
+  'PrepaidScheduleEntry',
   'BankStatementLine',
   'WithholdingTaxRecord',
   'JournalEntryLine',
