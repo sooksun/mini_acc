@@ -51,18 +51,19 @@ describe('TaxInvoicesService VAT eligibility (integration)', () => {
     });
   });
 
-  it('rejects when documentDate < vatEffectiveDate (422 VAT_NOT_EFFECTIVE)', async () => {
+  it('create() succeeds for a pre-VAT date; confirm() rejects (VAT_NOT_EFFECTIVE)', async () => {
+    // By design (CLAUDE.md): assertVatEligible fires only at confirm() — creating
+    // a DRAFT with any date must always succeed. The VAT gate is checked on confirm.
+    const draft = await service.create(
+      env.seed.companyId,
+      env.seed.userId,
+      baseDoc(env.seed.customerId, env.seed.productId, '2024-06-01T00:00:00+07:00'),
+    );
+    expect(draft.status).toBe('DRAFT');
     await expect(
-      service.create(
-        env.seed.companyId,
-        env.seed.userId,
-        baseDoc(env.seed.customerId, env.seed.productId, '2024-06-01T00:00:00+07:00'),
-      ),
+      service.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id),
     ).rejects.toMatchObject({
-      status: 422,
-      response: expect.objectContaining({
-        code: 'VAT_NOT_EFFECTIVE',
-      }),
+      response: expect.objectContaining({ code: 'VAT_NOT_EFFECTIVE' }),
     });
   });
 
@@ -113,18 +114,17 @@ describe('TaxInvoicesService VAT eligibility — company without VAT (integratio
     await teardownTestEnv(env);
   });
 
-  it('rejects when company has no vatEffectiveDate at all', async () => {
+  it('confirm() rejects when company has no vatEffectiveDate at all', async () => {
+    const draft = await service.create(
+      env.seed.companyId,
+      env.seed.userId,
+      baseDoc(env.seed.customerId, env.seed.productId, '2026-05-10T00:00:00+07:00'),
+    );
+    expect(draft.status).toBe('DRAFT');
     await expect(
-      service.create(
-        env.seed.companyId,
-        env.seed.userId,
-        baseDoc(env.seed.customerId, env.seed.productId, '2026-05-10T00:00:00+07:00'),
-      ),
+      service.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id),
     ).rejects.toMatchObject({
-      status: 422,
-      response: expect.objectContaining({
-        code: 'VAT_NOT_EFFECTIVE',
-      }),
+      response: expect.objectContaining({ code: 'VAT_NOT_EFFECTIVE' }),
     });
   });
 });
