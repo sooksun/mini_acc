@@ -99,6 +99,11 @@ services:
       NODE_ENV: production
       TZ: Asia/Bangkok
       PORT: 3000
+      # Next.js standalone binds to $HOSTNAME; Docker sets it to the container ID,
+      # so the loopback healthcheck (fetch http://localhost:3000/login) can't connect
+      # and the container shows "unhealthy" even though it serves fine via NPM.
+      # Force 0.0.0.0 so it binds all interfaces.
+      HOSTNAME: "0.0.0.0"
     ports:
       - "9930:3000"
     networks: [hj-net]
