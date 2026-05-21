@@ -5,7 +5,7 @@ import type { AccountingPeriodStatus } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
 import { useToast } from '@/components/ui/Toast';
-import { api } from '@/lib/api';
+import { api, apiBlob } from '@/lib/api';
 import { getToken, getUser } from '@/lib/auth';
 import { formatThaiDateTime } from '@/lib/format';
 
@@ -18,6 +18,17 @@ interface PeriodRow {
   closedBy: string | null;
   lockedAt: string | null;
   note: string | null;
+}
+
+interface ExportBatchRow {
+  id: string;
+  year: number;
+  month: number;
+  fileName: string;
+  sizeBytes: number;
+  fileCount: number;
+  generatedBy: string | null;
+  createdAt: string;
 }
 
 const STATUS_META: Record<AccountingPeriodStatus, { label: string; cls: string }> = {
@@ -46,8 +57,10 @@ const PACK_CONTENTS = [
 export default function AccountantPackPage() {
   const toast = useToast();
   const [periods, setPeriods] = useState<PeriodRow[]>([]);
+  const [batches, setBatches] = useState<ExportBatchRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const role = getUser()?.role;
   const canExport = role === 'OWNER' || role === 'ACCOUNTANT';
@@ -64,9 +77,37 @@ export default function AccountantPackPage() {
     }
   }
 
+  async function loadBatches() {
+    try {
+      setBatches(await api<ExportBatchRow[]>('/accountant-pack/batches'));
+    } catch {
+      // history is non-critical — ignore load errors
+    }
+  }
+
   useEffect(() => {
     load();
+    loadBatches();
   }, []);
+
+  async function redownload(batch: ExportBatchRow) {
+    setDownloadingId(batch.id);
+    try {
+      const blob = await apiBlob(`/accountant-pack/${batch.id}/download`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = batch.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: any) {
+      toast.error(e.message ?? 'ดาวน์โหลดซ้ำล้มเหลว');
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   async function downloadPack(period: PeriodRow) {
     if (!canExport) return;
@@ -103,11 +144,18 @@ export default function AccountantPackPage() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast.success(`Export ${period.year + 543}/${String(period.month).padStart(2, '0')} เรียบร้อย`);
+      loadBatches();
     } catch (e: any) {
       toast.error(e.message ?? 'Export ล้มเหลว');
     } finally {
       setExporting(null);
     }
+  }
+
+  function formatBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
   }
 
   const lockedPeriods = periods.filter((p) => p.status === 'LOCKED');
@@ -220,6 +268,50 @@ export default function AccountantPackPage() {
             )}
           </aside>
         </div>
+
+        {batches.length > 0 && (
+          <div className="mt-8">
+            <h2 className="mb-3 text-[15px] font-semibold tracking-tight">
+              ประวัติการ Export ({batches.length})
+            </h2>
+            <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
+              <table className="w-full text-[13px]">
+                <thead className="bg-surface-2 text-left text-text-soft">
+                  <tr>
+                    <th className="px-4 py-2.5 font-medium">งวด</th>
+                    <th className="px-4 py-2.5 font-medium">ไฟล์</th>
+                    <th className="px-4 py-2.5 text-right font-medium">ขนาด</th>
+                    <th className="px-4 py-2.5 font-medium">สร้างเมื่อ</th>
+                    <th className="px-4 py-2.5 text-right font-medium"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {batches.map((b) => (
+                    <tr key={b.id} className="border-t border-border">
+                      <td className="px-4 py-2.5 font-medium">
+                        {b.year + 543}/{String(b.month).padStart(2, '0')}
+                      </td>
+                      <td className="px-4 py-2.5 font-mono text-[11.5px] text-text-soft">{b.fileName}</td>
+                      <td className="px-4 py-2.5 text-right text-text-soft">{formatBytes(b.sizeBytes)}</td>
+                      <td className="px-4 py-2.5 text-text-soft">{formatThaiDateTime(b.createdAt)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {canExport && (
+                          <button
+                            onClick={() => redownload(b)}
+                            disabled={downloadingId === b.id}
+                            className="rounded-md border border-border bg-surface px-2.5 py-1 text-[12px] text-text-soft hover:bg-surface-3 disabled:opacity-60"
+                          >
+                            {downloadingId === b.id ? 'กำลังดาวน์โหลด…' : 'ดาวน์โหลดซ้ำ'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

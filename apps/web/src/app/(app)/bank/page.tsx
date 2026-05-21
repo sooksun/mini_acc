@@ -267,11 +267,13 @@ function ImportModal({
   const toast = useToast();
   const [bankAccount, setBankAccount] = useState('SCB-001');
   const [csv, setCsv] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setBankAccount('SCB-001');
+      setFile(null);
       setCsv(
         // Helpful starter — operator pastes real statement rows here.
         'postedAt,side,amount,description,reference\n2026-08-10,DEBIT,1500.00,Vendor payment,REF001\n',
@@ -281,21 +283,32 @@ function ImportModal({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!bankAccount.trim()) {
+      toast.error('กรุณากรอกบัญชีธนาคาร');
+      return;
+    }
     setSaving(true);
     try {
-      const lines = parseCsv(csv);
-      if (lines.length === 0) {
-        toast.error('CSV ว่าง — ต้องมีอย่างน้อย 1 บรรทัดข้อมูล');
-        return;
+      type ImportResult = { imported: number; autoMatched: number; unmatched: number };
+      let result: ImportResult;
+      if (file) {
+        // Upload the raw .csv — the server parser handles debit/credit columns,
+        // Thai headers, and Buddhist-era dates.
+        const fd = new FormData();
+        fd.append('bankAccount', bankAccount.trim());
+        fd.append('file', file);
+        result = await api<ImportResult>('/bank/import-csv', { method: 'POST', body: fd });
+      } else {
+        const lines = parseCsv(csv);
+        if (lines.length === 0) {
+          toast.error('CSV ว่าง — ต้องมีอย่างน้อย 1 บรรทัดข้อมูล หรือเลือกไฟล์ .csv');
+          return;
+        }
+        result = await api<ImportResult>('/bank/import', {
+          method: 'POST',
+          body: JSON.stringify({ bankAccount: bankAccount.trim(), lines }),
+        });
       }
-      const result = await api<{
-        imported: number;
-        autoMatched: number;
-        unmatched: number;
-      }>('/bank/import', {
-        method: 'POST',
-        body: JSON.stringify({ bankAccount: bankAccount.trim(), lines }),
-      });
       toast.success(
         `นำเข้า ${result.imported} รายการ · จับคู่อัตโนมัติ ${result.autoMatched} · ค้าง ${result.unmatched}`,
       );
@@ -339,17 +352,53 @@ function ImportModal({
             className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-[13.5px] outline-none focus:border-brand"
           />
         </label>
-        <label>
+        <label className="block">
+          <span className="mb-1 block text-[12.5px] text-text-soft">อัปโหลดไฟล์ .csv (แนะนำ)</span>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-[13px] file:mr-3 file:rounded-md file:border-0 file:bg-surface-3 file:px-3 file:py-1.5 file:text-[12.5px] file:font-medium file:text-text-soft hover:file:bg-surface-2"
+          />
+          <div className="mt-1 text-[11.5px] text-text-mute">
+            รองรับคอลัมน์ <code className="font-mono">date/วันที่</code>,{' '}
+            <code className="font-mono">debit/credit (ถอน/ฝาก)</code> หรือ{' '}
+            <code className="font-mono">side+amount</code>,{' '}
+            <code className="font-mono">description/รายละเอียด</code> — วันที่รับทั้ง ค.ศ. และ พ.ศ.
+          </div>
+          {file && (
+            <div className="mt-2 rounded-md border border-border bg-surface-2 px-3 py-1.5 text-[12.5px]">
+              <span className="font-medium">{file.name}</span>
+              <span className="ml-2 text-text-mute">({(file.size / 1024).toFixed(1)} KB)</span>
+              <button
+                type="button"
+                onClick={() => setFile(null)}
+                className="ml-3 text-[11.5px] text-bad hover:underline"
+              >
+                ลบไฟล์
+              </button>
+            </div>
+          )}
+        </label>
+
+        <div className="relative">
+          <div className="absolute inset-x-0 top-1/2 border-t border-border" />
+          <div className="relative mx-auto w-fit bg-surface px-3 text-[11px] text-text-mute">
+            หรือวาง CSV เอง
+          </div>
+        </div>
+
+        <label className={file ? 'pointer-events-none block opacity-40' : 'block'}>
           <span className="mb-1 block text-[12.5px] text-text-soft">
-            CSV ของรายการ — header แถวแรก:
+            วาง CSV — header แถวแรก:
             <code className="ml-1 font-mono text-[11px]">postedAt,side,amount,description,reference</code>
           </span>
           <textarea
             value={csv}
             onChange={(e) => setCsv(e.target.value)}
-            required
+            disabled={!!file}
             spellCheck={false}
-            className="min-h-48 w-full rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-[12px] outline-none focus:border-brand"
+            className="min-h-40 w-full rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-[12px] outline-none focus:border-brand"
           />
           <div className="mt-1 text-[11.5px] text-text-mute">
             postedAt = YYYY-MM-DD · side = DEBIT (ออก) หรือ CREDIT (เข้า) · reference (optional)

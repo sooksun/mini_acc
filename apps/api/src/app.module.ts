@@ -21,6 +21,7 @@ import { RisksModule } from './risks/risks.module';
 import { ClosingModule } from './closing/closing.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
+import { ProjectsModule } from './projects/projects.module';
 import { AccountantPackModule } from './accountant-pack/accountant-pack.module';
 import { AiModule } from './ai/ai.module';
 import { BankModule } from './bank/bank.module';
@@ -53,6 +54,7 @@ import { SystemModule } from './system/system.module';
     ClosingModule,
     InventoryModule,
     FixedAssetsModule,
+    ProjectsModule,
     AccountantPackModule,
     AiModule,
     BankModule,

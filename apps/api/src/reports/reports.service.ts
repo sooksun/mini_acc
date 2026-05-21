@@ -1,22 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { DocumentStatus, DocumentType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../prisma/prisma.service';
-
-/**
- * Statuses that count as "confirmed" for revenue/expense recognition.
- * Mirrors the rule used in accountant-pack/report-builders.ts.
- */
-const CONFIRMED_SALES_STATUSES: DocumentStatus[] = [
-  DocumentStatus.USER_CONFIRMED,
-  DocumentStatus.ACCOUNTED,
-  DocumentStatus.PENDING_ACCOUNTANT,
-  DocumentStatus.ACCOUNTANT_APPROVED,
-  DocumentStatus.LOCKED,
-];
-
-const REVENUE_PRIMARY_TYPES: DocumentType[] = [DocumentType.INVOICE, DocumentType.TAX_INVOICE];
-const REVENUE_CASH_TYPES: DocumentType[] = [DocumentType.RECEIPT, DocumentType.RECEIPT_TAX_INVOICE];
+import { ACCOUNTS } from '../journal/accounts';
 
 function toMonthRange(year: number, month: number) {
   const start = new Date(Date.UTC(year, month - 1, 1));
@@ -92,16 +77,19 @@ export class ReportsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Build a profit-and-loss summary for the company.
+   * Build a profit-and-loss summary for the company — derived from the journal
+   * (PRD §7.2: every figure traces back to a balanced Dr=Cr entry), not the
+   * document tables.
    *
-   * Recognition rules (accrual basis):
-   *   - Revenue = SalesDocument where type is INVOICE/TAX_INVOICE (always),
-   *     OR type is RECEIPT/RECEIPT_TAX_INVOICE with no parent (= standalone
-   *     cash sale). Status must be confirmed (not DRAFT/VOIDED).
-   *     Amount: subtotal (ex-VAT). Gross amount: grandTotal (incl. VAT).
-   *   - Expense = ExpenseRecord with status RECORDED (= not voided).
-   *     Amount: subtotal (ex-VAT). Gross: grandTotal (the cash outflow).
-   *   - Profit = revenue.subtotal - expense.subtotal
+   *   - Revenue = credits to income accounts (code 4xxx) on POSTED entries.
+   *     Gross adds output VAT (2151).
+   *   - Expense = debits to expense accounts (code 5xxx) on POSTED entries.
+   *     Gross adds input VAT (1151).
+   *   - Profit = revenue − expense (both ex-VAT).
+   *
+   * VOIDED entries are excluded. Capitalised costs (Dr intangible 1410) and
+   * prepaid (Dr 1180) correctly stay out of the P&L until depreciation /
+   * amortisation debits a 5xxx account.
    *
    * @param month optional — when set, returns single-month detail with the
    *              same year's 12-month strip alongside. When omitted, returns
@@ -122,81 +110,93 @@ export class ReportsService {
     const mode: 'monthly' | 'yearly' = month ? 'monthly' : 'yearly';
     const range = month ? toMonthRange(year, month) : toYearRange(year);
 
-    // ---- Revenue (sales documents) -----------------------------------------
-    const salesDocs = await this.prisma.salesDocument.findMany({
+    // ---- Pull the ledger (journal is the source of truth, PRD §7.2) --------
+    const entries = await this.prisma.journalEntry.findMany({
       where: {
         companyId,
-        status: { in: CONFIRMED_SALES_STATUSES },
-        documentDate: { gte: range.start, lt: range.end },
-        OR: [
-          { type: { in: REVENUE_PRIMARY_TYPES } },
-          { type: { in: REVENUE_CASH_TYPES }, parentDocumentId: null },
-        ],
+        status: 'POSTED',
+        entryDate: { gte: range.start, lt: range.end },
       },
       select: {
-        type: true,
-        documentDate: true,
-        subtotal: true,
-        grandTotal: true,
+        sourceType: true,
+        sourceId: true,
+        entryDate: true,
+        lines: {
+          select: { accountCode: true, accountName: true, debit: true, credit: true },
+        },
       },
     });
 
-    // ---- Expense (recorded expense records) --------------------------------
-    const expenses = await this.prisma.expenseRecord.findMany({
-      where: {
-        companyId,
-        status: 'RECORDED',
-        // Capitalized (intangible) and prepaid records are assets, not P&L
-        // expense — their cost reaches the P&L later via depreciation /
-        // prepaid amortization journals.
-        treatAsIntangible: false,
-        treatAsPrepaid: false,
-        expenseDate: { gte: range.start, lt: range.end },
-      },
-      select: {
-        expenseDate: true,
-        subtotal: true,
-        grandTotal: true,
-        category: true,
-      },
-    });
-
-    // ---- Aggregate ---------------------------------------------------------
     let revenue = 0;
     let revenueGross = 0;
-    const revenueByTypeMap = new Map<string, { amount: number; count: number }>();
-    const monthlyRevenue: number[] = new Array(12).fill(0);
-    const monthlyExpense: number[] = new Array(12).fill(0);
-
-    for (const doc of salesDocs) {
-      const sub = toNumber(doc.subtotal);
-      const gross = toNumber(doc.grandTotal);
-      revenue += sub;
-      revenueGross += gross;
-
-      const cur = revenueByTypeMap.get(doc.type) ?? { amount: 0, count: 0 };
-      revenueByTypeMap.set(doc.type, { amount: cur.amount + sub, count: cur.count + 1 });
-
-      const m = doc.documentDate.getUTCMonth();
-      monthlyRevenue[m] += sub;
-    }
-
     let expense = 0;
     let expenseGross = 0;
     const expenseByCatMap = new Map<string, { amount: number; count: number }>();
+    const monthlyRevenue: number[] = new Array(12).fill(0);
+    const monthlyExpense: number[] = new Array(12).fill(0);
 
-    for (const r of expenses) {
-      const sub = toNumber(r.subtotal);
-      const gross = toNumber(r.grandTotal);
-      expense += sub;
-      expenseGross += gross;
+    // Revenue groups by source-document type, which the journal line does not
+    // carry — collect the sales sourceIds now and resolve their types after.
+    const salesEntryRevenue: { sourceId: string; amount: number }[] = [];
+    let adjustmentRevenue = 0;
 
-      const cat = (r.category ?? '').trim() || 'ไม่ระบุหมวด';
-      const cur = expenseByCatMap.get(cat) ?? { amount: 0, count: 0 };
-      expenseByCatMap.set(cat, { amount: cur.amount + sub, count: cur.count + 1 });
+    for (const entry of entries) {
+      const m = entry.entryDate.getUTCMonth();
+      let entryRevenue = 0;
+      for (const line of entry.lines) {
+        const code = line.accountCode;
+        const debit = toNumber(line.debit);
+        const credit = toNumber(line.credit);
+        if (code.startsWith('4')) {
+          const v = credit - debit; // income is a credit; reversals net out
+          revenue += v;
+          revenueGross += v;
+          monthlyRevenue[m] += v;
+          entryRevenue += v;
+        } else if (code === ACCOUNTS.OUTPUT_VAT.code) {
+          revenueGross += credit - debit;
+        } else if (code.startsWith('5')) {
+          const v = debit - credit; // expense is a debit
+          expense += v;
+          expenseGross += v;
+          monthlyExpense[m] += v;
+          const cat = line.accountName.trim() || 'ไม่ระบุหมวด';
+          const cur = expenseByCatMap.get(cat) ?? { amount: 0, count: 0 };
+          expenseByCatMap.set(cat, { amount: cur.amount + v, count: cur.count + 1 });
+        } else if (code === ACCOUNTS.INPUT_VAT.code) {
+          expenseGross += debit - credit;
+        }
+      }
+      if (entryRevenue !== 0) {
+        if (entry.sourceType === 'SALES_DOCUMENT' && entry.sourceId) {
+          salesEntryRevenue.push({ sourceId: entry.sourceId, amount: entryRevenue });
+        } else {
+          adjustmentRevenue += entryRevenue;
+        }
+      }
+    }
 
-      const m = r.expenseDate.getUTCMonth();
-      monthlyExpense[m] += sub;
+    // Resolve revenue-by-document-type from the sales entries' source docs.
+    const revenueByTypeMap = new Map<string, { amount: number; count: number }>();
+    if (salesEntryRevenue.length > 0) {
+      const ids = [...new Set(salesEntryRevenue.map((s) => s.sourceId))];
+      const docs = await this.prisma.salesDocument.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, type: true },
+      });
+      const typeById = new Map(docs.map((d) => [d.id, d.type as string]));
+      for (const s of salesEntryRevenue) {
+        const key = typeById.get(s.sourceId) ?? 'ADJUSTMENT';
+        const cur = revenueByTypeMap.get(key) ?? { amount: 0, count: 0 };
+        revenueByTypeMap.set(key, { amount: cur.amount + s.amount, count: cur.count + 1 });
+      }
+    }
+    if (adjustmentRevenue !== 0) {
+      const cur = revenueByTypeMap.get('ADJUSTMENT') ?? { amount: 0, count: 0 };
+      revenueByTypeMap.set('ADJUSTMENT', {
+        amount: cur.amount + adjustmentRevenue,
+        count: cur.count + 1,
+      });
     }
 
     const profit = revenue - expense;
@@ -263,6 +263,7 @@ const TYPE_LABEL: Record<string, string> = {
   TAX_INVOICE: 'ใบกำกับภาษี',
   RECEIPT: 'ใบเสร็จรับเงิน',
   RECEIPT_TAX_INVOICE: 'ใบเสร็จ/ใบกำกับภาษี',
+  ADJUSTMENT: 'รายการปรับปรุง',
 };
 
 function round2(n: number): number {

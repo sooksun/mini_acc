@@ -12,6 +12,8 @@ import { NumberingService } from '../../numbering/numbering.service';
 import { getBuddhistYear } from '../../numbering/be-year';
 import { validateTransition } from '../../lifecycle/validate-transition';
 import { VatService } from '../../tax/vat.service';
+import { JournalService } from '../../journal/journal.service';
+import { ACCOUNTS, AccountRef } from '../../journal/accounts';
 import {
   CreateSalesDocumentInput,
   ListSalesDocumentsQuery,
@@ -26,7 +28,22 @@ export class SalesDocumentService {
     private prisma: PrismaService,
     private numbering: NumberingService,
     private vat: VatService,
+    private journal: JournalService,
   ) {}
+
+  /** Validate that a projectId (if given) belongs to the company. */
+  private async resolveProjectId(
+    companyId: string,
+    projectId: string | undefined,
+  ): Promise<string | null> {
+    if (!projectId) return null;
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, companyId },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+    return project.id;
+  }
 
   async create(
     type: DocumentType,
@@ -49,6 +66,7 @@ export class SalesDocumentService {
     if (preValidate) await preValidate(companyId, customer, input);
 
     await this.validateProducts(companyId, input.items);
+    const projectId = await this.resolveProjectId(companyId, input.projectId);
 
     const totals = computeTotals(input.items, input.vatRate ?? 7, input.whtRate ?? 0);
     const documentDate = new Date(input.documentDate);
@@ -63,7 +81,7 @@ export class SalesDocumentService {
         beYear,
         status: 'DRAFT',
         customerId: customer.id,
-        projectId: null,
+        projectId,
         documentDate,
         dueDate: input.dueDate ? new Date(input.dueDate) : null,
         reference: input.reference ?? null,
@@ -146,6 +164,7 @@ export class SalesDocumentService {
 
     await this.validateProducts(companyId, input.items);
 
+    const projectId = await this.resolveProjectId(companyId, input.projectId);
     const totals = computeTotals(input.items, input.vatRate ?? 7, input.whtRate ?? 0);
     const documentDate = new Date(input.documentDate);
     const beYear = getBuddhistYear(documentDate);
@@ -159,6 +178,7 @@ export class SalesDocumentService {
         where: { id },
         data: {
           customerId: customer.id,
+          projectId,
           documentDate,
           beYear,
           dueDate: input.dueDate ? new Date(input.dueDate) : null,
@@ -268,12 +288,185 @@ export class SalesDocumentService {
         });
       }
 
+      // Post the revenue journal so sales reach the ledger (PRD §7.2). Only
+      // revenue-recognition documents post — see postRevenueJournal.
+      await this.postRevenueJournal(tx, updated, companyId, userId);
+
       // Materialise the rest of the chain (DN/INV/RT|RC) as DRAFTs so the
       // operator can confirm each one as the real-world event happens.
       await this.createDownstreamDrafts(tx, updated, companyId, userId);
 
       return this.toDto(updated);
     });
+  }
+
+  /**
+   * Which document types recognise revenue in the ledger. Mirrors the
+   * recognition rule in ReportsService exactly so the journal-based P&L equals
+   * what users saw before: INVOICE/TAX_INVOICE always; a RECEIPT or
+   * RECEIPT_TAX_INVOICE only when standalone (no parent invoice) — i.e. a cash
+   * sale. A receipt that closes an invoice does NOT re-recognise revenue (the
+   * invoice already did); its cash is captured by the Payments module clearing
+   * the receivable.
+   */
+  private recognisesRevenue(doc: SalesDocument): boolean {
+    switch (doc.type) {
+      case 'INVOICE':
+      case 'TAX_INVOICE':
+        return true;
+      case 'RECEIPT':
+      case 'RECEIPT_TAX_INVOICE':
+        return doc.parentDocumentId === null;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Post the double-entry for a confirmed sales document.
+   *
+   *   AR docs (INVOICE / TAX_INVOICE):
+   *     Dr ลูกหนี้การค้า (grandTotal)
+   *     Cr รายได้ (subtotal)
+   *     Cr ภาษีขาย (vatAmount, if any)
+   *
+   *   Cash docs (standalone RECEIPT / RECEIPT_TAX_INVOICE):
+   *     Dr เงินสด (netReceived)
+   *     Dr ภาษีหัก ณ ที่จ่ายรอเรียกคืน (whtAmount, if the customer withheld)
+   *     Cr รายได้ (subtotal)
+   *     Cr ภาษีขาย (vatAmount, if any)
+   *
+   * Both balance because grandTotal = subtotal + vatAmount and
+   * netReceived = grandTotal − whtAmount. Non-revenue documents
+   * (QUOTATION / DELIVERY_NOTE / receipts that close an invoice) post nothing.
+   */
+  private async postRevenueJournal(
+    tx: Prisma.TransactionClient,
+    doc: SalesDocument & { items: SalesDocumentItem[] },
+    companyId: string,
+    userId: string,
+  ): Promise<void> {
+    if (!this.recognisesRevenue(doc)) return;
+
+    const isCash = doc.type === 'RECEIPT' || doc.type === 'RECEIPT_TAX_INVOICE';
+    const revenueAccount = await this.resolveRevenueAccount(tx, doc.items);
+
+    const lines: Parameters<typeof this.journal.postWithTx>[1]['lines'] = [];
+
+    if (isCash) {
+      lines.push({
+        accountCode: ACCOUNTS.CASH.code,
+        accountName: ACCOUNTS.CASH.name,
+        debit: doc.netReceived,
+        partnerId: doc.customerId,
+        description: doc.number,
+      });
+      if (!doc.whtAmount.isZero()) {
+        lines.push({
+          accountCode: ACCOUNTS.WHT_RECEIVABLE.code,
+          accountName: ACCOUNTS.WHT_RECEIVABLE.name,
+          debit: doc.whtAmount,
+          partnerId: doc.customerId,
+        });
+      }
+    } else {
+      lines.push({
+        accountCode: ACCOUNTS.AR.code,
+        accountName: ACCOUNTS.AR.name,
+        debit: doc.grandTotal,
+        partnerId: doc.customerId,
+        description: doc.number,
+      });
+    }
+
+    lines.push({
+      accountCode: revenueAccount.code,
+      accountName: revenueAccount.name,
+      credit: doc.subtotal,
+      partnerId: doc.customerId,
+    });
+    if (!doc.vatAmount.isZero()) {
+      lines.push({
+        accountCode: ACCOUNTS.OUTPUT_VAT.code,
+        accountName: ACCOUNTS.OUTPUT_VAT.name,
+        credit: doc.vatAmount,
+      });
+    }
+
+    await this.journal.postWithTx(tx, {
+      companyId,
+      userId,
+      entryDate: doc.documentDate,
+      description: `รายได้ ${doc.number} — ${doc.customerSnapshotName}`,
+      sourceType: 'SALES_DOCUMENT',
+      sourceId: doc.id,
+      lines,
+    });
+  }
+
+  /**
+   * Pick the revenue account: "รายได้จากการขาย" (4120) when any line is a
+   * stocked good/material/asset, otherwise "รายได้ค่าบริการ" (4110). Free-text
+   * lines (no productId) count as service. This only affects the trial-balance
+   * label — the P&L groups revenue by document type, not account code.
+   */
+  private async resolveRevenueAccount(
+    tx: Prisma.TransactionClient,
+    items: SalesDocumentItem[],
+  ): Promise<AccountRef> {
+    const productIds = items
+      .map((it) => it.productId)
+      .filter((id): id is string => !!id);
+    if (productIds.length === 0) return ACCOUNTS.REVENUE_SERVICE;
+
+    const products = await tx.product.findMany({
+      where: { id: { in: productIds } },
+      select: { type: true },
+    });
+    const hasGoods = products.some(
+      (p) => p.type === 'GOOD' || p.type === 'MATERIAL' || p.type === 'ASSET',
+    );
+    return hasGoods ? ACCOUNTS.REVENUE_SALE : ACCOUNTS.REVENUE_SERVICE;
+  }
+
+  /**
+   * One-time backfill: post the revenue journal for already-confirmed sales
+   * documents that predate journal posting (so journal-based reports include
+   * historical sales). Idempotent — skips any document that already has a
+   * POSTED SALES_DOCUMENT entry, and only revenue-recognition documents post.
+   */
+  async backfillRevenueJournals(companyId: string, userId: string) {
+    const docs = await this.prisma.salesDocument.findMany({
+      where: {
+        companyId,
+        status: {
+          in: [
+            'USER_CONFIRMED',
+            'ACCOUNTED',
+            'PENDING_ACCOUNTANT',
+            'ACCOUNTANT_APPROVED',
+            'LOCKED',
+          ],
+        },
+        type: { in: ['INVOICE', 'TAX_INVOICE', 'RECEIPT', 'RECEIPT_TAX_INVOICE'] },
+      },
+      include: { items: { orderBy: { lineNumber: 'asc' } } },
+      orderBy: { documentDate: 'asc' },
+    });
+
+    let posted = 0;
+    for (const doc of docs) {
+      if (!this.recognisesRevenue(doc)) continue;
+      const existing = await this.prisma.journalEntry.count({
+        where: { companyId, sourceType: 'SALES_DOCUMENT', sourceId: doc.id, status: 'POSTED' },
+      });
+      if (existing > 0) continue;
+      await this.prisma.$transaction((tx) =>
+        this.postRevenueJournal(tx, doc, companyId, userId),
+      );
+      posted += 1;
+    }
+    return { scanned: docs.length, posted };
   }
 
   /**
@@ -461,6 +654,18 @@ export class SalesDocumentService {
           voidReason: reason,
         },
         include: { items: { orderBy: { lineNumber: 'asc' } } },
+      });
+
+      // Void the revenue journal too so the document drops out of the
+      // journal-based P&L. No-op for documents that never posted one.
+      await tx.journalEntry.updateMany({
+        where: { companyId, sourceType: 'SALES_DOCUMENT', sourceId: id, status: 'POSTED' },
+        data: {
+          status: 'VOIDED',
+          voidedBy: userId,
+          voidedAt: new Date(),
+          voidReason: `void ${updated.number}: ${reason}`,
+        },
       });
 
       return this.toDto(updated);

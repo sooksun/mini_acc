@@ -49,15 +49,29 @@ export class WhtPdfService {
       });
     }
 
+    // Foreign WHT (ภ.ง.ด.54) records have no Payment — the recipient is the
+    // foreign vendor on the originating expense. Resolve it via the obligation
+    // so the certificate shows a real recipient instead of a blank block.
+    const isForeign = record.sourceType === 'FOREIGN_WHT';
+    let partner = record.payment?.partner ?? null;
+    if (isForeign && !partner) {
+      const obligation = await this.prisma.foreignTaxObligation.findFirst({
+        where: { id: record.sourceId, companyId },
+        include: { expenseRecord: { include: { vendor: true } } },
+      });
+      partner = obligation?.expenseRecord?.vendor ?? null;
+    }
+
     const company = await this.prisma.company.findUniqueOrThrow({
       where: { id: companyId },
     });
 
     const html = buildWhtCertificateHtml({
       company,
-      partner: record.payment?.partner ?? null,
+      partner,
       record,
       copies,
+      isForeign,
     });
     const buffer = await this.renderer.render(html);
 

@@ -17,6 +17,7 @@ interface ApiResponse {
   id: string;
   status: string;
   customerId: string;
+  projectId: string | null;
   documentDate: string;
   dueDate: string | null;
   reference: string | null;
@@ -70,6 +71,7 @@ export default function EditQuotationPage({ params }: { params: Promise<{ id: st
         setInitial({
           id: d.id,
           customer: { id: d.customerId, ...d.customer },
+          projectId: d.projectId,
           documentDate: d.documentDate,
           dueDate: d.dueDate,
           reference: d.reference,

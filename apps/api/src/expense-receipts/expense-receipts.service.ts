@@ -102,6 +102,7 @@ export class ExpenseReceiptsService {
         : 'UPLOADED';
 
     const billingNameMismatch = await this.isBillingMismatch(companyId, dto.billedToName);
+    const foreignWhtRate = await this.resolveForeignWhtRate(dto);
 
     // C4: write file to disk only if we commit the receipt; clean up otherwise.
     // We persist the file *before* the tx so the row can reference its path, but
@@ -143,7 +144,7 @@ export class ExpenseReceiptsService {
             dtaCountry: this.blankToNull(dto.dtaCountry),
             foreignWhtType: dto.foreignWhtType ?? null,
             foreignWhtBorneBy: dto.foreignWhtBorneBy ?? null,
-            foreignWhtRate: dto.foreignWhtRate ? new Prisma.Decimal(dto.foreignWhtRate) : null,
+            foreignWhtRate,
             billedToName: this.blankToNull(dto.billedToName),
             billingNameMismatch,
             treatAsIntangible: dto.treatAsIntangible ?? false,
@@ -1085,6 +1086,29 @@ export class ExpenseReceiptsService {
     return picked
       ? { country: picked.country, incomeType, rate: picked.rate.toString(), note: picked.note }
       : null;
+  }
+
+  /**
+   * Resolve the PND.54 rate to store on a foreign receipt at upload time:
+   * an explicit rate from the DTO wins; otherwise, when it's a foreign payment
+   * with a known income type, auto-fill the DTA-table suggestion (incl. the
+   * "*" Section-70 default) so the reviewer sees a sensible rate to confirm.
+   */
+  private async resolveForeignWhtRate(dto: {
+    isForeign?: boolean;
+    dtaCountry?: string;
+    foreignWhtType?: 'ROYALTY' | 'SERVICE' | 'OTHER' | null;
+    foreignWhtRate?: string;
+  }): Promise<Prisma.Decimal | null> {
+    if (dto.foreignWhtRate) return new Prisma.Decimal(dto.foreignWhtRate);
+    if (dto.isForeign && dto.foreignWhtType) {
+      const suggestion = await this.lookupWhtRate(
+        this.blankToNull(dto.dtaCountry) ?? undefined,
+        dto.foreignWhtType,
+      );
+      if (suggestion) return new Prisma.Decimal(suggestion.rate);
+    }
+    return null;
   }
 
   /** Next month period (rolls the year at December). month is 1-12. */

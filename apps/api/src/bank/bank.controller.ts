@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { AuthUser } from '@hj/shared-types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -46,6 +58,27 @@ export class BankController {
   })
   import(@CurrentUser() user: AuthUser, @Body() dto: ImportBankStatementDto) {
     return this.bank.importStatement(user.companyId, user.id, dto);
+  }
+
+  @Post('import-csv')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  @AuditAction('IMPORT_BANK_STATEMENT', {
+    entityType: 'BankStatementLine',
+    getEntityId: (_req, res) => res?.importBatchId,
+    getMetadata: (_req, res) => ({
+      imported: res?.imported,
+      autoMatched: res?.autoMatched,
+      unmatched: res?.unmatched,
+    }),
+  })
+  importCsv(
+    @CurrentUser() user: AuthUser,
+    @Body('bankAccount') bankAccount: string,
+    @UploadedFile() file?: { buffer: Buffer; originalname: string; mimetype: string },
+  ) {
+    if (!file) throw new BadRequestException('File required');
+    return this.bank.importCsv(user.companyId, user.id, bankAccount, file.buffer);
   }
 
   @Post('lines/:id/match')

@@ -783,6 +783,38 @@ describe('ExpenseReceiptsService (integration)', () => {
       const fallback = await service.lookupWhtRate('ZZ', 'ROYALTY');
       expect(fallback?.rate).toBe('15');
     });
+
+    it('auto-suggests foreignWhtRate from the DTA table when omitted on upload', async () => {
+      // Ensure a known treaty row exists (this config table isn't truncated).
+      await env.prisma.foreignWhtRate.upsert({
+        where: { country_incomeType: { country: 'FR', incomeType: 'ROYALTY' } },
+        update: { rate: '7' },
+        create: { country: 'FR', incomeType: 'ROYALTY', rate: '7', note: 'test' },
+      });
+      const vendor = await makeVendor('FR Royalty', '0000000061099');
+      const receipt = await service.upload(
+        env.seed.companyId,
+        env.seed.userId,
+        {
+          vendorTaxId: vendor.taxId!,
+          subtotal: '1000',
+          grandTotal: '1000',
+          paidAt: '2026-05-15',
+          isForeign: true,
+          expenseNature: 'SERVICE',
+          usedInThailand: true,
+          currency: 'EUR',
+          fxRate: '1',
+          dtaCountry: 'FR',
+          foreignWhtType: 'ROYALTY',
+          foreignWhtBorneBy: 'WITHHELD',
+          // foreignWhtRate intentionally omitted → auto-filled from the table
+        },
+        fakePdf('fr-auto.pdf', 'fr-auto-1'),
+      );
+      const row = await env.prisma.expenseReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
+      expect(row.foreignWhtRate?.toString()).toBe('7');
+    });
   });
 
   describe('F4 — capitalize as intangible / billing-name guard', () => {

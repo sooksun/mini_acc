@@ -49,6 +49,7 @@ export interface SalesDocumentInitial {
     taxId: string | null;
     branch: string | null;
   };
+  projectId?: string | null;
   documentDate: string;
   dueDate: string | null;
   reference: string | null;
@@ -97,6 +98,8 @@ export function SalesDocumentForm({
   const [dueDate, setDueDate] = useState(initial?.dueDate?.slice(0, 10) ?? '');
   const [reference, setReference] = useState(initial?.reference ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
+  const [projectId, setProjectId] = useState(initial?.projectId ?? '');
+  const [projects, setProjects] = useState<{ id: string; name: string; code: string | null }[]>([]);
   const [vatRate, setVatRate] = useState(initial ? Number(initial.vatRate) : 7);
   const [whtRate, setWhtRate] = useState(initial ? Number(initial.whtRate) : 0);
   const [items, setItems] = useState<ItemRow[]>(
@@ -125,6 +128,12 @@ export function SalesDocumentForm({
       .then((c) => setCompany({ vatEffectiveDate: c.vatEffectiveDate }))
       .catch(() => setCompany(null));
   }, [meta.requireCustomerTaxId]);
+
+  useEffect(() => {
+    api<{ items: { id: string; name: string; code: string | null }[] }>('/projects?take=200')
+      .then((r) => setProjects(r.items))
+      .catch(() => setProjects([]));
+  }, []);
 
   useEffect(() => {
     if (!documentDate) return;
@@ -229,6 +238,7 @@ export function SalesDocumentForm({
     try {
       const payload = {
         customerId: customer.id,
+        projectId: projectId || undefined,
         documentDate: new Date(documentDate + 'T00:00:00+07:00').toISOString(),
         dueDate: dueDate ? new Date(dueDate + 'T00:00:00+07:00').toISOString() : undefined,
         reference: reference || undefined,
@@ -374,6 +384,21 @@ export function SalesDocumentForm({
                     />
                   </Field>
                 </div>
+                <Field label="โครงการ">
+                  <select
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    className={inputCls}
+                  >
+                    <option value="">— ไม่ผูกโครงการ —</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.code ? `[${p.code}] ` : ''}
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="หมายเหตุ">
                   <textarea
                     value={note}

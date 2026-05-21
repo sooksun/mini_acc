@@ -140,4 +140,82 @@ describe('ClosingService (integration)', () => {
       expect(period.note).toBe('correction needed');
     });
   });
+
+  describe('H2: document locking + extra hard-blocks', () => {
+    it('close() locks confirmed sales documents in the period (§15.4)', async () => {
+      const doc = await env.prisma.salesDocument.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'INVOICE',
+          number: 'INV-2569-9101',
+          beYear: 2569,
+          status: 'USER_CONFIRMED',
+          customerId: env.seed.customerId,
+          documentDate: new Date(Date.UTC(2026, 10, 10)), // month 11
+          customerSnapshotName: 'ลูกค้าทดสอบ',
+          subtotal: '1000',
+          vatRate: '7',
+          vatAmount: '70',
+          totalAfterVat: '1070',
+          whtRate: '0',
+          whtAmount: '0',
+          grandTotal: '1070',
+          netReceived: '1070',
+          confirmedAt: new Date(),
+          confirmedBy: env.seed.userId,
+        },
+      });
+
+      const period = await service.closePeriod(env.seed.companyId, env.seed.userId, 'OWNER', {
+        year: 2026,
+        month: 11,
+      });
+      expect(period.status).toBe('LOCKED');
+
+      const after = await env.prisma.salesDocument.findUniqueOrThrow({ where: { id: doc.id } });
+      expect(after.status).toBe('LOCKED');
+      expect(after.lockedBy).toBe(env.seed.userId);
+      expect(after.lockedAt).not.toBeNull();
+    });
+
+    it('blocks close on unmatched bank lines in the period', async () => {
+      await env.prisma.bankStatementLine.create({
+        data: {
+          companyId: env.seed.companyId,
+          bankAccount: 'KBANK-001',
+          postedAt: new Date(Date.UTC(2026, 11, 10)), // month 12
+          side: 'CREDIT',
+          amount: '500',
+          description: 'เงินเข้าไม่ทราบที่มา',
+        },
+      });
+      const result = await service.checkPeriod(env.seed.companyId, 2026, 12);
+      expect(result.blockers.some((b) => b.code === 'UNMATCHED_BANK')).toBe(true);
+    });
+
+    it('blocks close on negative stock (company-wide)', async () => {
+      const good = await env.prisma.product.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'GOOD',
+          nameTh: 'สินค้าทดสอบสต็อก',
+          unit: 'ชิ้น',
+          unitPrice: '100',
+          vatable: true,
+        },
+      });
+      // Insert an OUT directly (bypassing the service guard) to force negative.
+      await env.prisma.inventoryMovement.create({
+        data: {
+          companyId: env.seed.companyId,
+          productId: good.id,
+          type: 'OUT',
+          quantity: '5',
+          movementDate: new Date(Date.UTC(2026, 0, 5)),
+        },
+      });
+      const result = await service.checkPeriod(env.seed.companyId, 2026, 1);
+      expect(result.blockers.some((b) => b.code === 'STOCK_NEGATIVE')).toBe(true);
+    });
+  });
 });

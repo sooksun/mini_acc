@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import type { AccountingPeriodStatus, Role } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { RisksService } from '../risks/risks.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { ClosePeriodDto, ReopenPeriodDto } from './dto/close-period.dto';
 
 export interface CheckBlocker {
@@ -22,6 +23,7 @@ export class ClosingService {
   constructor(
     private prisma: PrismaService,
     private risks: RisksService,
+    private inventory: InventoryService,
   ) {}
 
   /**
@@ -131,6 +133,105 @@ export class ClosingService {
       });
     }
 
+    const periodStart = new Date(Date.UTC(year, month - 1, 1));
+    const periodEnd = new Date(Date.UTC(year, month, 1));
+
+    // (e) PRD §17.4 — duplicate sales document numbers in the period. The DB
+    // unique key already prevents same (type, number), so this is an integrity
+    // guard that catches anomalies (e.g. a manual data fix gone wrong).
+    const dupNumberGroups = await this.prisma.salesDocument.groupBy({
+      by: ['number'],
+      where: {
+        companyId,
+        status: { not: 'VOIDED' },
+        number: { not: { startsWith: 'DRAFT-' } },
+        documentDate: { gte: periodStart, lt: periodEnd },
+      },
+      _count: { number: true },
+      having: { number: { _count: { gt: 1 } } },
+    });
+    if (dupNumberGroups.length > 0) {
+      blockers.push({
+        code: 'DUPLICATE_DOC_NUMBER',
+        message: `มีเลขเอกสารขายซ้ำในงวด ${dupNumberGroups.length} เลข`,
+        count: dupNumberGroups.length,
+      });
+    }
+
+    // (f) PRD §17.4 — negative stock. The stock-out guard blocks OUT movements,
+    // but ADJUST / opening balances can still drive a product below zero.
+    // Company-wide (stock isn't period-scoped).
+    const stock = await this.inventory.stockSummary(companyId);
+    const negativeStock = stock.filter((s) => Number(s.onHand) < 0);
+    if (negativeStock.length > 0) {
+      blockers.push({
+        code: 'STOCK_NEGATIVE',
+        message: `มีสินค้าสต็อกติดลบ ${negativeStock.length} รายการ`,
+        count: negativeStock.length,
+      });
+    }
+
+    // (g) PRD §17.4 — unmatched bank statement lines in the period: money moved
+    // through the bank with no reconciled payment.
+    const unmatchedBank = await this.prisma.bankStatementLine.count({
+      where: {
+        companyId,
+        matchedPaymentId: null,
+        postedAt: { gte: periodStart, lt: periodEnd },
+      },
+    });
+    if (unmatchedBank > 0) {
+      blockers.push({
+        code: 'UNMATCHED_BANK',
+        message: `รายการธนาคารในงวดยังไม่จับคู่ ${unmatchedBank} รายการ`,
+        count: unmatchedBank,
+      });
+    }
+
+    // (h) PRD §17.4 — invoice received (a payment was recorded against it) but
+    // no receipt issued. Driven by Payment→invoice linking (Payment.sourceId);
+    // until the UI records payments against invoices this stays dormant, which
+    // is correct — an unpaid open receivable must NOT block a period close.
+    const paidInvoiceIds = (
+      await this.prisma.payment.findMany({
+        where: {
+          companyId,
+          direction: 'IN',
+          status: 'COMPLETED',
+          sourceType: 'SALES_DOCUMENT',
+          sourceId: { not: null },
+        },
+        select: { sourceId: true },
+      })
+    )
+      .map((p) => p.sourceId)
+      .filter((id): id is string => !!id);
+
+    if (paidInvoiceIds.length > 0) {
+      const receivedNoReceipt = await this.prisma.salesDocument.count({
+        where: {
+          companyId,
+          id: { in: paidInvoiceIds },
+          type: { in: ['INVOICE', 'TAX_INVOICE'] },
+          status: { notIn: ['DRAFT', 'VOIDED'] },
+          documentDate: { gte: periodStart, lt: periodEnd },
+          childDocuments: {
+            none: {
+              type: { in: ['RECEIPT', 'RECEIPT_TAX_INVOICE'] },
+              status: { notIn: ['DRAFT', 'VOIDED'] },
+            },
+          },
+        },
+      });
+      if (receivedNoReceipt > 0) {
+        blockers.push({
+          code: 'INVOICE_RECEIVED_NO_RECEIPT',
+          message: `ใบแจ้งหนี้รับเงินแล้วแต่ยังไม่ออกใบเสร็จ ${receivedNoReceipt} ใบ`,
+          count: receivedNoReceipt,
+        });
+      }
+    }
+
     // Period summary numbers
     const [salesSum, expenseSum, journalCount] = await this.prisma.$transaction([
       this.prisma.salesDocument.aggregate({
@@ -206,27 +307,51 @@ export class ClosingService {
       });
     }
 
-    const period = await this.prisma.accountingPeriod.upsert({
-      where: { companyId_year_month: { companyId, year: dto.year, month: dto.month } },
-      create: {
-        companyId,
-        year: dto.year,
-        month: dto.month,
-        status: 'LOCKED',
-        closedAt: new Date(),
-        closedBy: userId,
-        lockedAt: new Date(),
-        lockedBy: userId,
-        note: dto.note?.trim() || null,
-      },
-      update: {
-        status: 'LOCKED',
-        closedAt: new Date(),
-        closedBy: userId,
-        lockedAt: new Date(),
-        lockedBy: userId,
-        note: dto.note?.trim() ?? undefined,
-      },
+    const now = new Date();
+    const periodStart = new Date(Date.UTC(dto.year, dto.month - 1, 1));
+    const periodEnd = new Date(Date.UTC(dto.year, dto.month, 1));
+
+    const period = await this.prisma.$transaction(async (tx) => {
+      const upserted = await tx.accountingPeriod.upsert({
+        where: { companyId_year_month: { companyId, year: dto.year, month: dto.month } },
+        create: {
+          companyId,
+          year: dto.year,
+          month: dto.month,
+          status: 'LOCKED',
+          closedAt: now,
+          closedBy: userId,
+          lockedAt: now,
+          lockedBy: userId,
+          note: dto.note?.trim() || null,
+        },
+        update: {
+          status: 'LOCKED',
+          closedAt: now,
+          closedBy: userId,
+          lockedAt: now,
+          lockedBy: userId,
+          note: dto.note?.trim() ?? undefined,
+        },
+      });
+
+      // PRD §15.4 / §8 — closing locks the documents in the period so they
+      // become immutable (corrections must go through void + adjustment). This
+      // is a period-authority bulk lock, broader than the per-document
+      // ACCOUNTANT_APPROVED→LOCKED transition; DRAFT (blocked above) and VOIDED
+      // are left untouched.
+      await tx.salesDocument.updateMany({
+        where: {
+          companyId,
+          status: {
+            in: ['USER_CONFIRMED', 'ACCOUNTED', 'PENDING_ACCOUNTANT', 'ACCOUNTANT_APPROVED'],
+          },
+          documentDate: { gte: periodStart, lt: periodEnd },
+        },
+        data: { status: 'LOCKED', lockedAt: now, lockedBy: userId },
+      });
+
+      return upserted;
     });
 
     return this.toDto(period);

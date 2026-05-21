@@ -115,6 +115,41 @@ async function main() {
     },
   });
 
+  // DTA withholding-rate reference for PND.54 (ภ.ง.ด.54). This is a *suggestion*
+  // table — the accountant confirms against the actual treaty. "*" = no-DTA /
+  // Section 70 statutory default (15%). Country rows are indicative reductions
+  // for common software/service vendor countries (ISO-2). Editable as config.
+  const TREATY_NOTE = 'อัตราตามอนุสัญญาภาษีซ้อน (ประมาณการ — ตรวจสอบกับอนุสัญญาฉบับจริง)';
+  const foreignWhtRates: Array<{
+    country: string;
+    incomeType: 'ROYALTY' | 'SERVICE' | 'OTHER';
+    rate: number;
+    note: string;
+  }> = [
+    { country: '*', incomeType: 'ROYALTY', rate: 15, note: 'default มาตรา 70 (ไม่มีอนุสัญญา)' },
+    { country: '*', incomeType: 'SERVICE', rate: 15, note: 'default มาตรา 70 (ไม่มีอนุสัญญา)' },
+    { country: '*', incomeType: 'OTHER', rate: 15, note: 'default มาตรา 70 (ไม่มีอนุสัญญา)' },
+    { country: 'US', incomeType: 'ROYALTY', rate: 5, note: TREATY_NOTE },
+    { country: 'US', incomeType: 'SERVICE', rate: 15, note: TREATY_NOTE },
+    { country: 'GB', incomeType: 'ROYALTY', rate: 5, note: TREATY_NOTE },
+    { country: 'GB', incomeType: 'SERVICE', rate: 15, note: TREATY_NOTE },
+    { country: 'DE', incomeType: 'ROYALTY', rate: 5, note: TREATY_NOTE },
+    { country: 'DE', incomeType: 'SERVICE', rate: 15, note: TREATY_NOTE },
+    { country: 'SG', incomeType: 'ROYALTY', rate: 10, note: TREATY_NOTE },
+    { country: 'SG', incomeType: 'SERVICE', rate: 15, note: TREATY_NOTE },
+    { country: 'CN', incomeType: 'ROYALTY', rate: 10, note: TREATY_NOTE },
+    { country: 'CN', incomeType: 'SERVICE', rate: 15, note: TREATY_NOTE },
+    { country: 'JP', incomeType: 'ROYALTY', rate: 15, note: TREATY_NOTE },
+    { country: 'JP', incomeType: 'SERVICE', rate: 15, note: TREATY_NOTE },
+  ];
+  for (const r of foreignWhtRates) {
+    await prisma.foreignWhtRate.upsert({
+      where: { country_incomeType: { country: r.country, incomeType: r.incomeType } },
+      update: { rate: r.rate, note: r.note },
+      create: r,
+    });
+  }
+
   console.log('Seed complete.');
   console.log('  OWNER login: owner@solutionsnextgen.co.th / owner123!');
   console.log('  ADMIN login: admin@solutionsnextgen.co.th / admin123!');

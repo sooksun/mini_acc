@@ -1,9 +1,32 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SalesDocumentService } from '../sales/_shared/sales-document.service';
 
 @Injectable()
 export class SystemService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly salesDoc: SalesDocumentService,
+  ) {}
+
+  /**
+   * Backfill revenue journals for sales documents confirmed before the ledger
+   * wiring existed. Safe to run repeatedly — see
+   * SalesDocumentService.backfillRevenueJournals.
+   */
+  async backfillSalesJournals(companyId: string, userId: string) {
+    const result = await this.salesDoc.backfillRevenueJournals(companyId, userId);
+    await this.prisma.auditLog.create({
+      data: {
+        companyId,
+        userId,
+        action: 'BACKFILL_SALES_JOURNALS',
+        reason: 'ลงบัญชีย้อนหลังให้เอกสารขายที่ยืนยันก่อนระบบต่อ Journal',
+        metadata: result as never,
+      },
+    });
+    return { success: true, ...result };
+  }
 
   async resetBaseline(companyId: string, userId: string) {
     // Capture counts before delete for audit summary

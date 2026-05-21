@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import type { AuthUser } from '@hj/shared-types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -15,10 +15,9 @@ export class AccountantPackController {
   constructor(private pack: AccountantPackService) {}
 
   /**
-   * Stream the ZIP directly into the HTTP response. We don't store the file
-   * on disk — every export is fresh from the current data (which, since the
-   * period is LOCKED, can't have changed since the last call). If we ever
-   * need download history, persist the byte count via ExportBatch.
+   * Build the pack for a LOCKED period, persist it as an ExportBatch (PRD §18),
+   * and stream the ZIP back for immediate download. The persisted copy can be
+   * re-fetched later via GET :id/download.
    */
   @Post('export')
   @Roles('OWNER', 'ACCOUNTANT')
@@ -32,10 +31,37 @@ export class AccountantPackController {
     @Body() dto: ExportPackDto,
     @Res() res: Response,
   ) {
-    const { filename, stream } = await this.pack.exportPack(user.companyId, dto.year, dto.month);
+    const { filename, buffer } = await this.pack.exportPack(
+      user.companyId,
+      dto.year,
+      dto.month,
+      user.id,
+    );
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-store');
-    stream.pipe(res);
+    res.end(buffer);
+  }
+
+  /** Export history for the company (most recent first). */
+  @Get('batches')
+  @Roles('OWNER', 'ACCOUNTANT', 'ADMIN', 'VIEWER')
+  listBatches(@CurrentUser() user: AuthUser) {
+    return this.pack.listBatches(user.companyId);
+  }
+
+  /** Re-download a previously exported pack. */
+  @Get(':id/download')
+  @Roles('OWNER', 'ACCOUNTANT')
+  async download(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const { filename, buffer } = await this.pack.downloadBatch(user.companyId, id);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(buffer);
   }
 }

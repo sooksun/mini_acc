@@ -262,4 +262,63 @@ describe('BankService (integration)', () => {
       expect(typeof c.daysOff).toBe('number');
     });
   });
+
+  describe('importCsv', () => {
+    it('parses a side+amount CSV (with Buddhist date) into lines', async () => {
+      const csv = [
+        'date,side,amount,description,reference',
+        '10/09/2569,CREDIT,"2,500.00",เงินเข้าจากลูกค้า,INV-1',
+        '2026-09-11,DEBIT,800,ค่าบริการ,',
+      ].join('\n');
+      const result = await service.importCsv(
+        env.seed.companyId,
+        env.seed.userId,
+        'KBANK-CSV',
+        Buffer.from(csv, 'utf8'),
+      );
+      expect(result.imported).toBe(2);
+
+      const lines = await env.prisma.bankStatementLine.findMany({
+        where: { companyId: env.seed.companyId, bankAccount: 'KBANK-CSV' },
+        orderBy: { postedAt: 'asc' },
+      });
+      expect(lines).toHaveLength(2);
+      // Buddhist 2569 → Gregorian 2026, comma-stripped amount
+      expect(lines[0]!.postedAt.toISOString().slice(0, 10)).toBe('2026-09-10');
+      expect(lines[0]!.side).toBe('CREDIT');
+      expect(lines[0]!.amount.toString()).toBe('2500');
+    });
+
+    it('derives side from debit/credit (ถอน/ฝาก) columns', async () => {
+      const csv = [
+        'วันที่,ถอน,ฝาก,รายละเอียด',
+        '2026-09-15,1000,,ถอนเงินสด',
+        '2026-09-16,,3000,รับโอน',
+      ].join('\n');
+      const result = await service.importCsv(
+        env.seed.companyId,
+        env.seed.userId,
+        'BBL-CSV',
+        Buffer.from(csv, 'utf8'),
+      );
+      expect(result.imported).toBe(2);
+      const lines = await env.prisma.bankStatementLine.findMany({
+        where: { companyId: env.seed.companyId, bankAccount: 'BBL-CSV' },
+        orderBy: { postedAt: 'asc' },
+      });
+      expect(lines.map((l) => l.side)).toEqual(['DEBIT', 'CREDIT']);
+      expect(lines[1]!.amount.toString()).toBe('3000');
+    });
+
+    it('rejects a CSV missing required columns', async () => {
+      await expect(
+        service.importCsv(
+          env.seed.companyId,
+          env.seed.userId,
+          'X',
+          Buffer.from('foo,bar\n1,2', 'utf8'),
+        ),
+      ).rejects.toMatchObject({ response: expect.objectContaining({ code: 'BAD_HEADER' }) });
+    });
+  });
 });

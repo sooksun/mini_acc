@@ -298,6 +298,7 @@ model Company {
   bankStatementLines BankStatementLine[]
   foreignTaxObligations ForeignTaxObligation[]
   prepaidScheduleEntries PrepaidScheduleEntry[]
+  exportBatches      ExportBatch[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -790,6 +791,29 @@ model GeneratedPdf {
   createdAt DateTime @default(now())
 
   @@index([companyId, documentType, documentId])
+}
+
+/// Persisted Accountant Pack export (PRD §18/§20). Each export writes the ZIP
+/// to disk and records this row so the operator can re-download it later and
+/// see export history per period. The pack is only ever built from a LOCKED
+/// period, so the file is a stable point-in-time snapshot.
+model ExportBatch {
+  id          String   @id @default(cuid())
+  companyId   String
+  year        Int
+  month       Int
+  fileName    String   @db.VarChar(200)
+  storedPath  String   @db.VarChar(500)
+  sizeBytes   Int
+  fileCount   Int      @default(0)
+  generatedBy String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, year, month])
+  @@index([companyId, createdAt])
 }
 
 // ============================================================================

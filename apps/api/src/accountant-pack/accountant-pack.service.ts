@@ -1,5 +1,8 @@
 import archiver from 'archiver';
-import { PassThrough, Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   Injectable,
   Logger,
@@ -23,6 +26,9 @@ import {
   buildWhtReport,
 } from './report-builders';
 import { buildRiskSummaryPdf } from './risk-summary-pdf';
+
+/** Numbered report files in the pack (01..13) — recorded on the ExportBatch. */
+const PACK_REPORT_FILE_COUNT = 13;
 
 @Injectable()
 export class AccountantPackService {
@@ -48,7 +54,8 @@ export class AccountantPackService {
     companyId: string,
     year: number,
     month: number,
-  ): Promise<{ filename: string; stream: Readable }> {
+    userId?: string,
+  ): Promise<{ filename: string; buffer: Buffer; batchId: string }> {
     const period = await this.prisma.accountingPeriod.findUnique({
       where: { companyId_year_month: { companyId, year, month } },
     });
@@ -146,14 +153,80 @@ export class AccountantPackService {
       { name: 'README.txt' },
     );
 
-    // Finalize — must come after every append. archive.finalize() returns a
-    // promise; the stream consumer (HTTP response) drains the archive
-    // independently, so we let finalize() resolve in the background.
-    archive.finalize().catch((err) => {
-      this.logger.error(`Failed to finalize archive: ${err.message}`);
+    // Collect the whole archive into a Buffer so we can both persist it as
+    // evidence (ExportBatch) and stream it back. The pack comes from a LOCKED
+    // period so it's a stable snapshot — worth keeping for re-download.
+    const bufferPromise = collectStream(out);
+    await archive.finalize();
+    const buffer = await bufferPromise;
+
+    const relDir = join('accountant-packs', companyId);
+    await mkdir(join(this.getStorageRoot(), relDir), { recursive: true });
+    const relPath = join(relDir, `${periodLabel}-${randomUUID()}.zip`);
+    await writeFile(join(this.getStorageRoot(), relPath), buffer);
+
+    const batch = await this.prisma.exportBatch.create({
+      data: {
+        companyId,
+        year,
+        month,
+        fileName: filename,
+        storedPath: relPath,
+        sizeBytes: buffer.length,
+        fileCount: PACK_REPORT_FILE_COUNT,
+        generatedBy: userId ?? null,
+      },
     });
 
-    return { filename, stream: out };
+    this.logger.log(
+      `Accountant pack persisted: batch=${batch.id} bytes=${buffer.length} period=${periodLabel}`,
+    );
+
+    return { filename, buffer, batchId: batch.id };
+  }
+
+  /** List previously exported packs (most recent first). */
+  async listBatches(companyId: string) {
+    const items = await this.prisma.exportBatch.findMany({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return items.map((b) => ({
+      id: b.id,
+      year: b.year,
+      month: b.month,
+      fileName: b.fileName,
+      sizeBytes: b.sizeBytes,
+      fileCount: b.fileCount,
+      generatedBy: b.generatedBy,
+      createdAt: b.createdAt.toISOString(),
+    }));
+  }
+
+  /** Read a persisted pack back from disk for re-download. */
+  async downloadBatch(companyId: string, id: string): Promise<{ filename: string; buffer: Buffer }> {
+    const batch = await this.prisma.exportBatch.findFirst({ where: { id, companyId } });
+    if (!batch) {
+      throw new NotFoundException({ statusCode: 404, code: 'EXPORT_NOT_FOUND', message: 'ไม่พบไฟล์ export นี้' });
+    }
+    const abs = isAbsolute(batch.storedPath)
+      ? batch.storedPath
+      : join(this.getStorageRoot(), batch.storedPath);
+    try {
+      const buffer = await readFile(abs);
+      return { filename: batch.fileName, buffer };
+    } catch {
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'EXPORT_FILE_MISSING',
+        message: 'ไฟล์ export ถูกลบหรือย้ายไปแล้ว — กรุณา export ใหม่',
+      });
+    }
+  }
+
+  private getStorageRoot(): string {
+    return process.env.ATTACHMENT_DIR ?? join(process.cwd(), 'var', 'attachments');
   }
 
   private buildReadme(companyName: string, year: number, month: number, closedAt: Date | null) {
@@ -189,4 +262,14 @@ export class AccountantPackService {
       'utf-8',
     );
   }
+}
+
+/** Drain a readable stream fully into a single Buffer. */
+function collectStream(stream: PassThrough): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+    stream.on('error', reject);
+  });
 }

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { RiskItemType, RiskLevel, RiskItemStatus } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { ListRisksDto } from './dto/list-risks.dto';
 import { ResolveRiskDto } from './dto/resolve-risk.dto';
 
@@ -16,7 +17,10 @@ export interface DetectedRisk {
 
 @Injectable()
 export class RisksService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private inventory: InventoryService,
+  ) {}
 
   async list(companyId: string, dto: ListRisksDto) {
     const where: Prisma.RiskItemWhereInput = {
@@ -167,6 +171,46 @@ export class RisksService {
         title: `รายจ่าย ${er.documentNumber ?? er.id} ไม่มี journal entry`,
         description: 'รายการลงรายจ่ายแล้วแต่ไม่พบ journal entry — ระบบ posting อาจมี bug',
       });
+    }
+
+    // (4) Duplicate sales document numbers — the (companyId, type, number)
+    // unique key prevents same (type, number), so any real-numbered string that
+    // appears more than once is a data-integrity anomaly worth flagging.
+    const dupNumbers = await this.prisma.salesDocument.groupBy({
+      by: ['number'],
+      where: {
+        companyId,
+        status: { not: 'VOIDED' },
+        number: { not: { startsWith: 'DRAFT-' } },
+      },
+      _count: { number: true },
+      having: { number: { _count: { gt: 1 } } },
+    });
+    for (const dup of dupNumbers) {
+      detected.push({
+        type: 'DUPLICATE_DOCUMENT',
+        level: 'CRITICAL',
+        entityType: 'SalesDocumentNumber',
+        entityId: dup.number,
+        title: `เลขเอกสารขาย ${dup.number} ซ้ำ ${dup._count.number} ใบ`,
+        description: 'เลขเอกสารต้องไม่ซ้ำ — ตรวจสอบและออกเลขใหม่/ยกเลิกใบที่ซ้ำ',
+      });
+    }
+
+    // (5) Negative stock — the stock-out guard blocks OUT below zero, but
+    // ADJUST / opening balances can still push a product negative.
+    const stock = await this.inventory.stockSummary(companyId);
+    for (const s of stock) {
+      if (Number(s.onHand) < 0) {
+        detected.push({
+          type: 'STOCK_NEGATIVE',
+          level: 'CRITICAL',
+          entityType: 'Product',
+          entityId: s.productId,
+          title: `สินค้า ${s.nameTh} สต็อกติดลบ (${s.onHand} ${s.unit})`,
+          description: 'สต็อกติดลบ — ตรวจสอบการเคลื่อนไหวสินค้า/ยอดยกมา',
+        });
+      }
     }
 
     // Upsert each detected risk. Look up existing by (type, entityType, entityId).

@@ -125,6 +125,114 @@ export class BankService {
     };
   }
 
+  /**
+   * Parse an uploaded CSV bank statement and import it through the same
+   * pipeline as the JSON import (so auto-match runs identically). Accepts a
+   * header row with flexible Thai/English column names — each row needs a date,
+   * a description, and either a `side`+`amount` pair or separate debit/credit
+   * (ถอน/ฝาก) columns. Buddhist years (>2400) are converted to Gregorian.
+   */
+  async importCsv(companyId: string, userId: string, bankAccount: string, fileBuffer: Buffer) {
+    if (!bankAccount?.trim()) {
+      throw new BadRequestException('bankAccount is required');
+    }
+    const lines = this.parseCsvToLines(fileBuffer);
+    if (lines.length === 0) {
+      throw new BadRequestException({
+        code: 'NO_ROWS',
+        message: 'ไม่พบรายการในไฟล์ CSV — ตรวจสอบหัวคอลัมน์และข้อมูล',
+      });
+    }
+    return this.importStatement(companyId, userId, { bankAccount: bankAccount.trim(), lines });
+  }
+
+  private parseCsvToLines(buffer: Buffer): BankStatementLineInput[] {
+    const text = buffer.toString('utf8').replace(/^﻿/, '');
+    const rows = parseCsvText(text);
+    if (rows.length < 2) return [];
+
+    const header = rows[0]!.map((h) => h.trim().toLowerCase());
+    const col = (aliases: string[]) => header.findIndex((h) => aliases.includes(h));
+
+    const iDate = col(['date', 'postedat', 'posted_at', 'วันที่', 'วันที่ทำรายการ', 'transaction date']);
+    const iSide = col(['side', 'ประเภท']);
+    const iAmount = col(['amount', 'จำนวนเงิน', 'จำนวน']);
+    const iDebit = col(['debit', 'withdrawal', 'ถอน', 'เดบิต', 'เงินออก']);
+    const iCredit = col(['credit', 'deposit', 'ฝาก', 'เครดิต', 'เงินเข้า']);
+    const iBalance = col(['balance', 'คงเหลือ', 'ยอดคงเหลือ']);
+    const iDesc = col(['description', 'รายละเอียด', 'รายการ', 'detail', 'memo']);
+    const iRef = col(['reference', 'ref', 'อ้างอิง', 'เลขที่อ้างอิง']);
+
+    if (iDate < 0 || iDesc < 0) {
+      throw new BadRequestException({
+        code: 'BAD_HEADER',
+        message: 'CSV ต้องมีคอลัมน์วันที่ (date) และรายละเอียด (description)',
+      });
+    }
+    const hasSideAmount = iSide >= 0 && iAmount >= 0;
+    const hasDebitCredit = iDebit >= 0 || iCredit >= 0;
+    if (!hasSideAmount && !hasDebitCredit) {
+      throw new BadRequestException({
+        code: 'BAD_HEADER',
+        message: 'CSV ต้องมี side+amount หรือคอลัมน์ debit/credit (ถอน/ฝาก)',
+      });
+    }
+
+    const out: BankStatementLineInput[] = [];
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r]!;
+      const cell = (i: number) => (i >= 0 && i < row.length ? (row[i] ?? '').trim() : '');
+      const rawDate = cell(iDate);
+      const desc = cell(iDesc);
+      if (!rawDate && !desc) continue;
+
+      const postedAt = normalizeStatementDate(rawDate);
+      if (!postedAt) {
+        throw new BadRequestException({
+          code: 'BAD_ROW',
+          message: `แถว ${r + 1}: วันที่ "${rawDate}" ไม่ถูกต้อง (ใช้ YYYY-MM-DD หรือ DD/MM/YYYY)`,
+        });
+      }
+
+      let side: 'DEBIT' | 'CREDIT';
+      let amount: string;
+      if (hasSideAmount && cell(iSide)) {
+        const s = cell(iSide).toUpperCase();
+        side = s.startsWith('D') || s.includes('ถอน') || s.includes('ออก') ? 'DEBIT' : 'CREDIT';
+        amount = cell(iAmount).replace(/,/g, '');
+      } else {
+        const debit = cell(iDebit).replace(/,/g, '');
+        const credit = cell(iCredit).replace(/,/g, '');
+        if (Number(debit || '0') > 0) {
+          side = 'DEBIT';
+          amount = debit;
+        } else if (Number(credit || '0') > 0) {
+          side = 'CREDIT';
+          amount = credit;
+        } else {
+          continue; // zero-value row
+        }
+      }
+      amount = amount.replace(/^-/, '');
+      if (!/^\d+(\.\d{1,2})?$/.test(amount)) {
+        throw new BadRequestException({
+          code: 'BAD_ROW',
+          message: `แถว ${r + 1}: จำนวนเงิน "${amount}" ไม่ถูกต้อง`,
+        });
+      }
+      const balanceRaw = iBalance >= 0 ? cell(iBalance).replace(/,/g, '') : '';
+      out.push({
+        postedAt,
+        side,
+        amount,
+        balance: balanceRaw && /^-?\d+(\.\d{1,2})?$/.test(balanceRaw) ? balanceRaw : undefined,
+        description: desc || '(ไม่มีรายละเอียด)',
+        reference: iRef >= 0 ? cell(iRef) || undefined : undefined,
+      });
+    }
+    return out;
+  }
+
   async list(companyId: string, dto: ListBankLinesDto) {
     const where: Prisma.BankStatementLineWhereInput = {
       companyId,
@@ -357,4 +465,68 @@ export class BankService {
         : null,
     };
   }
+}
+
+/**
+ * Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes
+ * ("" inside quotes), commas inside quotes, and CRLF/LF line endings. Returns
+ * rows of string cells, dropping fully blank rows.
+ */
+function parseCsvText(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field);
+      field = '';
+    } else if (c === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else if (c !== '\r') {
+      field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((cell) => cell.trim() !== ''));
+}
+
+/** Accept YYYY-MM-DD, YYYY/MM/DD, DD/MM/YYYY, DD-MM-YYYY. Buddhist years
+ *  (>2400) are converted to Gregorian. Returns ISO YYYY-MM-DD or null. */
+function normalizeStatementDate(raw: string): string | null {
+  const s = raw.trim();
+  let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (m) return isoDate(adjustYear(Number(m[1])), Number(m[2]), Number(m[3]));
+  m = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (m) return isoDate(adjustYear(Number(m[3])), Number(m[2]), Number(m[1]));
+  return null;
+}
+
+function adjustYear(y: number): number {
+  return y > 2400 ? y - 543 : y;
+}
+
+function isoDate(y: number, mo: number, d: number): string | null {
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }

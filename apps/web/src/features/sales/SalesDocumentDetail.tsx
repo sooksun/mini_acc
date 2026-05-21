@@ -100,6 +100,11 @@ export function SalesDocumentDetail({
     !!meta.canAccount &&
     doc.status === 'USER_CONFIRMED' &&
     (role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT');
+  // On a confirmed QUOTATION the chain has already materialised an INVOICE
+  // draft (createDownstreamDrafts) — surface a shortcut to it.
+  const childInvoice = doc?.childDocuments.find(
+    (c) => c.type === 'INVOICE' && c.status !== 'VOIDED',
+  );
 
   async function load() {
     setLoading(true);
@@ -311,6 +316,14 @@ export function SalesDocumentDetail({
               >
                 ยืนยัน → ออกเลขจริง
               </button>
+            )}
+            {doc.type === 'QUOTATION' && childInvoice && (
+              <Link
+                href={`${DOC_TYPE_META.INVOICE.listHref}/${childInvoice.id}` as any}
+                className="rounded-md border border-brand/40 bg-brand/5 px-4 py-2 text-[13px] font-medium text-brand hover:bg-brand/10"
+              >
+                แปลงเป็นใบแจ้งหนี้ →
+              </Link>
             )}
             {canAccount && (
               <button

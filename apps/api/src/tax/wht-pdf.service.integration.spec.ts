@@ -227,5 +227,75 @@ describe('WhtPdfService (integration)', () => {
       expect(split.pnd53.count).toBe(1);
       expect(split.pnd3.count).toBe(0);
     });
+
+    it('renders a certificate for a FOREIGN_WHT record, resolving the foreign vendor', async () => {
+      // Build the chain renderCertificate walks: vendor → expense record →
+      // obligation → WHT record (sourceType FOREIGN_WHT, sourceId = obligation).
+      const vendor = await env.prisma.partner.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'VENDOR',
+          nameTh: 'Anysphere, Inc.',
+          address: 'San Francisco, CA, USA',
+        },
+      });
+      const receipt = await env.prisma.expenseReceipt.create({
+        data: {
+          companyId: env.seed.companyId,
+          status: 'ACCOUNTED',
+          originalFileName: 'f.pdf',
+          storedPath: '/tmp/f.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 10,
+        },
+      });
+      const record = await env.prisma.expenseRecord.create({
+        data: {
+          companyId: env.seed.companyId,
+          receiptId: receipt.id,
+          vendorId: vendor.id,
+          status: 'RECORDED',
+          expenseDate: new Date('2026-09-05'),
+          subtotal: '1000',
+          grandTotal: '1000',
+        },
+      });
+      const obligation = await env.prisma.foreignTaxObligation.create({
+        data: {
+          companyId: env.seed.companyId,
+          expenseRecordId: record.id,
+          kind: 'PND54_WHT',
+          status: 'FILED',
+          baseAmount: '1000',
+          rate: '5',
+          taxAmount: '50',
+          expensePeriodYear: 2026,
+          expensePeriodMonth: 9,
+          filePeriodYear: 2026,
+          filePeriodMonth: 10,
+        },
+      });
+      const wht = await env.prisma.withholdingTaxRecord.create({
+        data: {
+          companyId: env.seed.companyId,
+          recordType: 'PAYABLE',
+          sourceType: 'FOREIGN_WHT',
+          sourceId: obligation.id,
+          paidAt: new Date('2026-10-07T12:00:00+07:00'),
+          partnerName: 'Anysphere, Inc.',
+          partnerTaxId: null,
+          baseAmount: '1000',
+          rate: '5',
+          whtAmount: '50',
+          category: 'ROYALTY',
+          periodYear: 2026,
+          periodMonth: 10,
+        },
+      });
+
+      const { buffer, fileName } = await service.renderCertificate(env.seed.companyId, wht.id);
+      assertPdfBuffer(buffer);
+      expect(fileName.endsWith('.pdf')).toBe(true);
+    });
   });
 });

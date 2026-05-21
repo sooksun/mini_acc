@@ -26,6 +26,8 @@ export interface WhtCertificateInput {
   record: WithholdingTaxRecord;
   /** Render ต้นฉบับ + ทั้ง 2 สำเนา (3 หน้า) — set to ['ORIGINAL'] for a single page. */
   copies?: CertCopy[];
+  /** Foreign payment (ภ.ง.ด.54 / มาตรา 70) — relabels the certificate. */
+  isForeign?: boolean;
 }
 
 function checkbox(checked: boolean): string {
@@ -113,19 +115,35 @@ table.amounts tfoot td.num { text-align: right; font-variant-numeric: tabular-nu
 
 function renderCopyPage(input: WhtCertificateInput, copy: CertCopy): string {
   const { company, partner, record } = input;
+  const isForeign = input.isForeign ?? false;
   const pndForm = inferPndForm(record.partnerTaxId);
   const paidAt = new Date(record.paidAt);
   const category = record.category?.trim() ?? '';
 
-  // Match category against the 6 income-type checkboxes on Form 50 ทวิ.
-  const isType1 = /40\(1\)|เงินเดือน/.test(category);
-  const isType2 = /40\(2\)|ค่านายหน้า|ค่าธรรมเนียม/.test(category);
-  const isType3 = /40\(3\)|ลิขสิทธิ์/.test(category);
-  const isType4 = /40\(4\)|ดอกเบี้ย/.test(category);
-  const isType5 = /40\(5\)|ค่าเช่า/.test(category);
-  const isType6or8 = /40\(8\)|40\(6\)|40\(7\)|วิชาชีพอิสระ|รับเหมา|ค่าจ้างทำของ|บริการ/.test(category);
-  // Default: "อื่น ๆ" if none matched and we have a non-empty category
-  const isOther = !!category && !isType1 && !isType2 && !isType3 && !isType4 && !isType5 && !isType6or8;
+  // Income-type checkbox selection. Foreign (ภ.ง.ด.54) maps the foreignWhtType
+  // verbatim; domestic matches the category text against the มาตรา 40 buckets.
+  let isType1 = false;
+  let isType2 = false;
+  let isType3 = false;
+  let isType4 = false;
+  let isType5 = false;
+  let isType6or8 = false;
+  let isOther = false;
+  if (isForeign) {
+    const t = category.toUpperCase();
+    isType3 = t === 'ROYALTY'; // ค่าแห่งลิขสิทธิ์ มาตรา 40(3)
+    isType6or8 = t === 'SERVICE'; // ค่าบริการ/กำไรธุรกิจ
+    isOther = !isType3 && !isType6or8;
+  } else {
+    isType1 = /40\(1\)|เงินเดือน/.test(category);
+    isType2 = /40\(2\)|ค่านายหน้า|ค่าธรรมเนียม/.test(category);
+    isType3 = /40\(3\)|ลิขสิทธิ์/.test(category);
+    isType4 = /40\(4\)|ดอกเบี้ย/.test(category);
+    isType5 = /40\(5\)|ค่าเช่า/.test(category);
+    isType6or8 = /40\(8\)|40\(6\)|40\(7\)|วิชาชีพอิสระ|รับเหมา|ค่าจ้างทำของ|บริการ/.test(category);
+    // Default: "อื่น ๆ" if none matched and we have a non-empty category
+    isOther = !!category && !isType1 && !isType2 && !isType3 && !isType4 && !isType5 && !isType6or8;
+  }
 
   const partnerAddress = partner?.address ?? '';
   const companyAddress = company.address ?? '';
@@ -142,7 +160,7 @@ function renderCopyPage(input: WhtCertificateInput, copy: CertCopy): string {
     ${logoCell}
     <div>
       <h1>หนังสือรับรองการหักภาษี ณ ที่จ่าย</h1>
-      <div class="sub">ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร</div>
+      <div class="sub">${isForeign ? 'ตามมาตรา 70 แห่งประมวลรัษฎากร (ภ.ง.ด.54 — จ่ายเงินได้ไปต่างประเทศ)' : 'ตามมาตรา 50 ทวิ แห่งประมวลรัษฎากร'}</div>
     </div>
     <div class="cert-num">
       <div class="label">เล่มที่ / เลขที่</div>
@@ -165,7 +183,7 @@ function renderCopyPage(input: WhtCertificateInput, copy: CertCopy): string {
     <div class="row">
       <div class="label">ชื่อ</div><div class="value" style="grid-column: span 3;">${escapeHtml(record.partnerName)}</div>
       <div class="label">เลขประจำตัวผู้เสียภาษี</div><div class="value" style="font-family:'IBM Plex Mono',monospace;">${escapeHtml(formatTaxId(record.partnerTaxId))}</div>
-      <div class="label">ประเภท</div><div class="value">${pndForm === 'PND53' ? 'นิติบุคคล' : 'บุคคลธรรมดา'}</div>
+      <div class="label">ประเภท</div><div class="value">${isForeign ? 'นิติบุคคลต่างประเทศ' : pndForm === 'PND53' ? 'นิติบุคคล' : 'บุคคลธรรมดา'}</div>
       <div class="label">ที่อยู่</div><div class="value address" style="grid-column: span 3;">${escapeHtml(partnerAddress)}</div>
     </div>
   </div>
@@ -173,13 +191,17 @@ function renderCopyPage(input: WhtCertificateInput, copy: CertCopy): string {
   <div class="section">
     <h2>ลำดับที่ในแบบ</h2>
     <div class="pnd-row">
-      <span><span class="cb">${checkbox(pndForm === 'PND53' === false && /ภงด\.?1ก/.test(category))}</span> ภ.ง.ด.1ก</span>
+      ${
+        isForeign
+          ? `<span><span class="cb">☑</span> ภ.ง.ด.54 (จ่ายเงินได้ไปต่างประเทศ — มาตรา 70)</span>`
+          : `<span><span class="cb">${checkbox(/ภงด\.?1ก/.test(category))}</span> ภ.ง.ด.1ก</span>
       <span><span class="cb">${checkbox(false)}</span> ภ.ง.ด.1ก พิเศษ</span>
       <span><span class="cb">${checkbox(false)}</span> ภ.ง.ด.2</span>
       <span><span class="cb">${checkbox(pndForm === 'PND3')}</span> ภ.ง.ด.3</span>
       <span><span class="cb">${checkbox(false)}</span> ภ.ง.ด.2ก</span>
       <span><span class="cb">${checkbox(false)}</span> ภ.ง.ด.3ก</span>
-      <span><span class="cb">${checkbox(pndForm === 'PND53')}</span> ภ.ง.ด.53</span>
+      <span><span class="cb">${checkbox(pndForm === 'PND53')}</span> ภ.ง.ด.53</span>`
+      }
     </div>
   </div>
 
@@ -255,7 +277,7 @@ function renderCopyPage(input: WhtCertificateInput, copy: CertCopy): string {
   </div>
 
   <div class="footer">
-    ${pndForm === 'PND53' ? 'ภ.ง.ด.53 (นิติบุคคล)' : 'ภ.ง.ด.3 (บุคคลธรรมดา)'} ·
+    ${isForeign ? 'ภ.ง.ด.54 (จ่ายต่างประเทศ — มาตรา 70)' : pndForm === 'PND53' ? 'ภ.ง.ด.53 (นิติบุคคล)' : 'ภ.ง.ด.3 (บุคคลธรรมดา)'} ·
     รอบ ${record.periodYear + 543}/${record.periodMonth.toString().padStart(2, '0')} ·
     Auto-generated โดย HJ Account AI · เก็บไว้เป็นหลักฐานตามประมวลรัษฎากร
   </div>

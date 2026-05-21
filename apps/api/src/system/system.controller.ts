@@ -17,4 +17,10 @@ export class SystemController {
   resetBaseline(@CurrentUser() user: AuthUser, @Body() _dto: ResetBaselineDto) {
     return this.system.resetBaseline(user.companyId, user.id);
   }
+
+  @Post('backfill-sales-journals')
+  @Roles('OWNER')
+  backfillSalesJournals(@CurrentUser() user: AuthUser) {
+    return this.system.backfillSalesJournals(user.companyId, user.id);
+  }
 }

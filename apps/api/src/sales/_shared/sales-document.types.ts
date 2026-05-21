@@ -13,6 +13,7 @@ export interface SalesDocumentItemInput {
 
 export interface CreateSalesDocumentInput {
   customerId: string;
+  projectId?: string;
   documentDate: string;
   dueDate?: string;
   reference?: string;

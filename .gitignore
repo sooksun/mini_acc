@@ -12,6 +12,10 @@ build
 !.env.test.example
 !.env.production.example
 .env.production
+.env_backup
+
+# Claude Code agent worktrees / local cache — never commit
+.claude/
 
 # Production backups (volume-mounted into backup container)
 backup/*.sql

@@ -35,6 +35,7 @@ const TABLES_FK_DEPENDENT_ORDER = [
   // Existing children
   'SalesDocumentItem',
   'GeneratedPdf',
+  'ExportBatch',
   'Attachment',
   'ExpenseRecord',
   'ExpenseReceipt',

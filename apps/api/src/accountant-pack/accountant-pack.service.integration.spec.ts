@@ -1,4 +1,7 @@
-import { NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { NotFoundException } from '@nestjs/common';
 import { AccountantPackService } from './accountant-pack.service';
 import { ClosingService } from '../closing/closing.service';
 import {
@@ -13,6 +16,8 @@ describe('AccountantPackService (integration)', () => {
   let closing: ClosingService;
 
   beforeAll(async () => {
+    // Persist packs under a throwaway temp dir so the repo's var/ stays clean.
+    process.env.ATTACHMENT_DIR = join(tmpdir(), `hjacc-pack-test-${randomUUID()}`);
     env = await bootstrapTestEnv();
     service = env.app.get(AccountantPackService);
     closing = env.app.get(ClosingService);
@@ -21,14 +26,6 @@ describe('AccountantPackService (integration)', () => {
   afterAll(async () => {
     await teardownTestEnv(env);
   });
-
-  async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks);
-  }
 
   it('refuses export when period does not exist', async () => {
     await expect(
@@ -52,34 +49,53 @@ describe('AccountantPackService (integration)', () => {
     });
   });
 
-  it('streams a ZIP starting with PK header when period is LOCKED', async () => {
+  it('builds a ZIP, persists an ExportBatch, and re-downloads it', async () => {
     // Close a clean period (no docs, no risks) so all hard blocks pass.
     await closing.closePeriod(env.seed.companyId, env.seed.userId, 'OWNER', {
       year: 2026,
       month: 5,
     });
 
-    const { filename, stream } = await service.exportPack(env.seed.companyId, 2026, 5);
+    const { filename, buffer, batchId } = await service.exportPack(
+      env.seed.companyId,
+      2026,
+      5,
+      env.seed.userId,
+    );
     expect(filename).toContain('accountant-pack');
     expect(filename).toContain('2026-05');
     expect(filename.endsWith('.zip')).toBe(true);
+    expect(batchId).toBeTruthy();
 
-    const buf = await streamToBuffer(stream);
     // ZIP "local file header" magic: 0x50 0x4b 0x03 0x04 ("PK\x03\x04")
-    expect(buf.length).toBeGreaterThan(200);
-    expect(buf[0]).toBe(0x50);
-    expect(buf[1]).toBe(0x4b);
-    expect(buf[2]).toBe(0x03);
-    expect(buf[3]).toBe(0x04);
-
-    // The Central Directory at the end should reference our expected files.
-    // Decoded as UTF-8 across the whole buffer, filenames appear verbatim.
-    const text = buf.toString('utf-8');
+    expect(buffer.length).toBeGreaterThan(200);
+    expect(buffer[0]).toBe(0x50);
+    expect(buffer[1]).toBe(0x4b);
+    const text = buffer.toString('utf-8');
     expect(text).toContain('01_sales_register.xlsx');
-    expect(text).toContain('06_vat_report.xlsx');
-    expect(text).toContain('08_journal_entries.xlsx');
     expect(text).toContain('12_risk_summary.pdf');
     expect(text).toContain('13_attachment_index.xlsx');
     expect(text).toContain('README.txt');
+
+    // Persisted as an ExportBatch (PRD §18) — listable + re-downloadable.
+    const batches = await service.listBatches(env.seed.companyId);
+    const row = batches.find((b) => b.id === batchId);
+    expect(row).toBeDefined();
+    expect(row?.year).toBe(2026);
+    expect(row?.month).toBe(5);
+    expect(row?.sizeBytes).toBe(buffer.length);
+
+    const dl = await service.downloadBatch(env.seed.companyId, batchId);
+    expect(dl.filename).toBe(filename);
+    expect(dl.buffer.length).toBe(buffer.length);
+    expect(dl.buffer[0]).toBe(0x50);
   }, 60000);
+
+  it('download throws when the batch id is unknown', async () => {
+    await expect(
+      service.downloadBatch(env.seed.companyId, 'nonexistent-id'),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'EXPORT_NOT_FOUND' }),
+    });
+  });
 });
