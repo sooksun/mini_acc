@@ -23,7 +23,10 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    # BullMQ requires noeviction: allkeys-lru would evict queued job keys when Redis
+    # hits maxmemory and silently drop PDF jobs. Keep the 256mb cap — with noeviction a
+    # full Redis fails writes loudly (recoverable) instead of losing jobs.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_data:/data
     healthcheck:
