@@ -47,4 +47,21 @@ apps/api/var/
 storage/
 *.tsbuildinfo
 
+# apps/web/public/ is served UNAUTHENTICATED — deny by default, then allowlist only the
+# static assets that belong in the web bundle. Anything else dropped here (generated *.pdf,
+# ad-hoc downloads, oversized source art) stays out of git automatically.
+apps/web/public/*
+!apps/web/public/.gitkeep
+!apps/web/public/logo.png
+!apps/web/public/favicon.ico
+!apps/web/public/favicon-16x16.png
+!apps/web/public/favicon-32x32.png
+!apps/web/public/apple-touch-icon.png
+!apps/web/public/android-chrome-192x192.png
+!apps/web/public/android-chrome-512x512.png
+!apps/web/public/site.webmanifest
+
+# never commit archives anywhere in the repo (handoff bundles, favicon-generator downloads)
+*.zip
+
 prisma/migrations/dev.db*
