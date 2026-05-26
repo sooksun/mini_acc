@@ -108,10 +108,12 @@ export default function QuotationFromReceiptsPage() {
           unit: it.unit,
           quantity: String(it.quantity),
           purchasePrice: String(it.purchaseUnitPrice),
+          // ราคาขายยึด cost × markup เสมอ (กฎซื้อมา-ขายไป) แม้จับคู่สินค้าเดิมได้
+          // ถอยไปใช้ราคาในแคตตาล็อกเฉพาะตอน AI อ่านราคาทุนไม่ได้ (suggestedSellPrice = 0)
           sellPrice: String(
-            it.match.status === 'EXISTING' && it.match.productUnitPrice != null
-              ? it.match.productUnitPrice
-              : it.suggestedSellPrice,
+            it.suggestedSellPrice > 0
+              ? it.suggestedSellPrice
+              : it.match.productUnitPrice ?? it.suggestedSellPrice,
           ),
           productType: 'GOOD',
           vatable: true,
