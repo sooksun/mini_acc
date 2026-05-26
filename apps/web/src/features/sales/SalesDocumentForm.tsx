@@ -442,6 +442,7 @@ export function SalesDocumentForm({
                       <tr key={idx} className="border-b border-border align-top">
                         <td className="px-2 py-2 text-text-mute">{idx + 1}</td>
                         <td className="px-2 py-2">
+                          <div className="max-w-[460px]">
                           <ProductPicker
                             value={
                               it.productId
@@ -467,6 +468,7 @@ export function SalesDocumentForm({
                             className={`${inputCls} mt-1.5`}
                             maxLength={2000}
                           />
+                          </div>
                         </td>
                         <td className="px-2 py-2">
                           <input
