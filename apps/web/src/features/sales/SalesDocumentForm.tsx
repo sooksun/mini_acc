@@ -422,116 +422,114 @@ export function SalesDocumentForm({
                   + เพิ่มแถว
                 </button>
               </div>
-              <div className="overflow-x-auto lg:overflow-x-visible">
-                <table className="w-full min-w-[800px] text-[13px]">
-                  <thead>
-                    <tr className="border-b border-border bg-surface-2 text-left text-text-soft">
-                      <th className="px-2 py-2 font-medium">#</th>
-                      <th className="px-2 py-2 font-medium">รายการ</th>
-                      <th className="px-2 py-2 font-medium">หน่วย</th>
-                      <th className="px-2 py-2 text-right font-medium">จำนวน</th>
-                      <th className="px-2 py-2 text-right font-medium">ราคา</th>
-                      <th className="px-2 py-2 text-right font-medium">ส่วนลด</th>
-                      <th className="px-2 py-2 font-medium">VAT</th>
-                      <th className="px-2 py-2 text-right font-medium">รวม</th>
-                      <th className="px-2 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((it, idx) => (
-                      <tr key={idx} className="border-b border-border align-top">
-                        <td className="px-2 py-2 text-text-mute">{idx + 1}</td>
-                        <td className="px-2 py-2">
-                          <div className="max-w-[460px]">
-                          <ProductPicker
-                            value={
-                              it.productId
-                                ? ({
-                                    id: it.productId,
-                                    code: it.productCode ?? null,
-                                    nameTh: it.description,
-                                    type: it.productType ?? 'SERVICE',
-                                    unit: it.unit,
-                                    unitPrice: String(it.unitPrice),
-                                    vatable: it.vatable,
-                                    description: null,
-                                  } as any)
-                                : null
-                            }
-                            onChange={(p) => p && applyProduct(idx, p)}
-                          />
-                          <textarea
-                            placeholder="หรือกรอกคำอธิบายเอง"
-                            value={it.description}
-                            onChange={(e) => updateRow(idx, { description: e.target.value })}
-                            rows={2}
-                            className={`${inputCls} mt-1.5`}
-                            maxLength={2000}
-                          />
-                          </div>
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            value={it.unit}
-                            onChange={(e) => updateRow(idx, { unit: e.target.value })}
-                            className={`${inputCls} w-20`}
-                            maxLength={32}
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            step="0.0001"
-                            min="0"
-                            value={it.quantity}
-                            onChange={(e) => updateRow(idx, { quantity: Number(e.target.value) })}
-                            className={`${inputCls} w-24 text-right font-mono`}
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={it.unitPrice}
-                            onChange={(e) => updateRow(idx, { unitPrice: Number(e.target.value) })}
-                            className={`${inputCls} w-28 text-right font-mono`}
-                          />
-                        </td>
-                        <td className="px-2 py-2">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={it.discount}
-                            onChange={(e) => updateRow(idx, { discount: Number(e.target.value) })}
-                            className={`${inputCls} w-24 text-right font-mono`}
-                          />
-                        </td>
-                        <td className="px-2 py-2 text-center">
+              <div className="space-y-3">
+                {items.map((it, idx) => (
+                  <div key={idx} className="rounded-lg border border-border bg-surface-2/40 p-3">
+                    {/* หัวการ์ด: ลำดับ + ลบ */}
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[12px] font-semibold text-text-mute">
+                        รายการที่ {idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeRow(idx)}
+                        disabled={items.length === 1}
+                        className="text-[12px] text-bad hover:underline disabled:opacity-30"
+                      >
+                        ลบ
+                      </button>
+                    </div>
+
+                    {/* แถวที่ 1 — รายการ (เลือกสินค้า + คำอธิบาย) */}
+                    <ProductPicker
+                      value={
+                        it.productId
+                          ? ({
+                              id: it.productId,
+                              code: it.productCode ?? null,
+                              nameTh: it.description,
+                              type: it.productType ?? 'SERVICE',
+                              unit: it.unit,
+                              unitPrice: String(it.unitPrice),
+                              vatable: it.vatable,
+                              description: null,
+                            } as any)
+                          : null
+                      }
+                      onChange={(p) => p && applyProduct(idx, p)}
+                    />
+                    <textarea
+                      placeholder="หรือกรอกคำอธิบายเอง"
+                      value={it.description}
+                      onChange={(e) => updateRow(idx, { description: e.target.value })}
+                      rows={2}
+                      className={`${inputCls} mt-1.5`}
+                      maxLength={2000}
+                    />
+
+                    {/* แถวที่ 2 — หน่วย / จำนวน / ราคา / ส่วนลด / VAT / รวม */}
+                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] text-text-mute">หน่วย</span>
+                        <input
+                          value={it.unit}
+                          onChange={(e) => updateRow(idx, { unit: e.target.value })}
+                          className={inputCls}
+                          maxLength={32}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] text-text-mute">จำนวน</span>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0"
+                          value={it.quantity}
+                          onChange={(e) => updateRow(idx, { quantity: Number(e.target.value) })}
+                          className={`${inputCls} text-right font-mono`}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] text-text-mute">ราคา</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={it.unitPrice}
+                          onChange={(e) => updateRow(idx, { unitPrice: Number(e.target.value) })}
+                          className={`${inputCls} text-right font-mono`}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11px] text-text-mute">ส่วนลด</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={it.discount}
+                          onChange={(e) => updateRow(idx, { discount: Number(e.target.value) })}
+                          className={`${inputCls} text-right font-mono`}
+                        />
+                      </label>
+                      <div className="flex flex-col">
+                        <span className="mb-1 block text-[11px] text-text-mute">VAT</span>
+                        <span className="flex h-[34px] items-center">
                           <input
                             type="checkbox"
                             checked={it.vatable}
                             onChange={(e) => updateRow(idx, { vatable: e.target.checked })}
                           />
-                        </td>
-                        <td className="px-2 py-2 text-right font-mono">
+                        </span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="mb-1 block text-[11px] text-text-mute">รวม</span>
+                        <span className="flex h-[34px] items-center justify-end px-1 font-mono text-[13px] font-medium">
                           {lineTotal(it).toFixed(2)}
-                        </td>
-                        <td className="px-2 py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => removeRow(idx)}
-                            disabled={items.length === 1}
-                            className="text-[11.5px] text-bad hover:underline disabled:opacity-30"
-                          >
-                            ลบ
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
