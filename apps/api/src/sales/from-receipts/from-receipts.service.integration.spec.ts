@@ -64,6 +64,7 @@ describe('FromReceiptsService.createQuotation (integration)', () => {
       include: { items: true },
     });
     expect(doc?.type).toBe('QUOTATION');
+    expect(Number(doc?.whtRate)).toBe(1); // goods resale → 1% WHT (standard rule)
     expect(doc?.items).toHaveLength(1);
     expect(doc?.items[0]?.productId).toBe(newProd?.id);
     expect(Number(doc?.items[0]?.quantity)).toBe(2);

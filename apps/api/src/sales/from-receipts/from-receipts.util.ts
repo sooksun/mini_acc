@@ -1,3 +1,5 @@
+import type { ProductType } from '@hj/shared-types';
+
 /**
  * Pure helpers for the "quotation from purchase receipts" flow. Kept free of
  * Nest/Prisma so they're trivially unit-testable.
@@ -97,4 +99,16 @@ export function applyMarkup(purchase: number, markupPercent: number): number {
   if (!Number.isFinite(purchase) || purchase < 0) return 0;
   const sell = purchase * (1 + markupPercent / 100);
   return Math.round((sell + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Document-level WHT suggestion, mirroring the sales form rule
+ * (SalesDocumentForm): any SERVICE → 3%, else any GOOD/MATERIAL → 1%, else 0%.
+ * SERVICE wins when types are mixed (one rate per document). A buy-and-resell
+ * quotation (goods) therefore comes out at 1%.
+ */
+export function suggestWhtRate(types: ProductType[]): number {
+  if (types.some((t) => t === 'SERVICE')) return 3;
+  if (types.some((t) => t === 'GOOD' || t === 'MATERIAL')) return 1;
+  return 0;
 }

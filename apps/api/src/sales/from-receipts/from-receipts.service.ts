@@ -10,6 +10,7 @@ import { SalesDocumentService } from '../_shared/sales-document.service';
 import {
   applyMarkup,
   proposeMatch,
+  suggestWhtRate,
   type MatchResult,
   type ProductLike,
 } from './from-receipts.util';
@@ -163,6 +164,7 @@ export class FromReceiptsService {
       unitPrice: number;
       vatable: boolean;
     }[] = [];
+    const productTypes: ProductType[] = [];
 
     for (const item of dto.items) {
       let productId: string;
@@ -174,21 +176,24 @@ export class FromReceiptsService {
         }
         const existing = await this.prisma.product.findFirst({
           where: { id: item.productId, companyId },
-          select: { id: true },
+          select: { id: true, type: true },
         });
         if (!existing) {
           throw new NotFoundException(`ไม่พบสินค้า ${item.productId} ในระบบ`);
         }
         productId = existing.id;
+        productTypes.push(existing.type as ProductType);
       } else {
+        const type = (item.productType ?? 'GOOD') as ProductType;
         const created = await this.products.create(companyId, {
-          type: (item.productType ?? 'GOOD') as ProductType,
+          type,
           nameTh: item.nameTh,
           unit: item.unit,
           unitPrice: item.unitPrice,
           vatable: item.vatable ?? true,
         });
         productId = created.id;
+        productTypes.push(type);
       }
 
       lineItems.push({
@@ -208,7 +213,9 @@ export class FromReceiptsService {
       projectId: dto.projectId,
       documentDate: dto.documentDate,
       vatRate: dto.vatRate,
-      whtRate: dto.whtRate,
+      // WHT follows the standard rule (SERVICE→3%, GOOD/MATERIAL→1%, else 0%);
+      // a goods resale lands at 1%. Owner can still override on the edit page.
+      whtRate: dto.whtRate ?? suggestWhtRate(productTypes),
       items: lineItems,
     });
   }

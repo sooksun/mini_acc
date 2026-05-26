@@ -4,6 +4,7 @@ import {
   nameSimilarity,
   normalizeName,
   proposeMatch,
+  suggestWhtRate,
   type ProductLike,
 } from './from-receipts.util';
 
@@ -69,5 +70,22 @@ describe('proposeMatch', () => {
     const m = proposeMatch('อะไรก็ได้', []);
     expect(m.status).toBe('NEW');
     expect(m.productId).toBeUndefined();
+  });
+});
+
+describe('suggestWhtRate', () => {
+  it('is 1% for a goods/material resale (the buy-and-resell case)', () => {
+    expect(suggestWhtRate(['GOOD'])).toBe(1);
+    expect(suggestWhtRate(['GOOD', 'MATERIAL'])).toBe(1);
+  });
+
+  it('is 3% when any item is a SERVICE (service wins)', () => {
+    expect(suggestWhtRate(['GOOD', 'SERVICE'])).toBe(3);
+    expect(suggestWhtRate(['SERVICE'])).toBe(3);
+  });
+
+  it('is 0% for assets / empty', () => {
+    expect(suggestWhtRate(['ASSET'])).toBe(0);
+    expect(suggestWhtRate([])).toBe(0);
   });
 });
