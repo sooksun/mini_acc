@@ -273,8 +273,8 @@ model Company {
   vatEffectiveDate DateTime?
   capital          Decimal?  @db.Decimal(18, 2)
   // Default sell-price markup % applied when building a quotation from uploaded
-  // purchase receipts (owner-configurable in Settings). e.g. 30 → sell = cost × 1.30.
-  defaultMarkupPercent Decimal @default(30) @db.Decimal(5, 2)
+  // purchase receipts (owner-configurable in Settings). e.g. 15 → sell = cost × 1.15.
+  defaultMarkupPercent Decimal @default(15) @db.Decimal(5, 2)
 
   vatStatuses        CompanyVatStatus[]
   users              User[]

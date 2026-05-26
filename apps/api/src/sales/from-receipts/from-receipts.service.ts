@@ -86,7 +86,7 @@ export class FromReceiptsService {
       select: { defaultMarkupPercent: true },
     });
     const markupPercent =
-      markupOverride ?? (company ? company.defaultMarkupPercent.toNumber() : 30);
+      markupOverride ?? (company ? company.defaultMarkupPercent.toNumber() : 15);
 
     // Load the active catalog once for fuzzy matching.
     const catalog = await this.prisma.product.findMany({

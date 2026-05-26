@@ -67,7 +67,7 @@ export default function QuotationFromReceiptsPage() {
   const [phase, setPhase] = useState<'upload' | 'review'>('upload');
   const [customer, setCustomer] = useState<{ id: string; nameTh: string } | null>(null);
   const [documentDate, setDocumentDate] = useState(localDateString());
-  const [markup, setMarkup] = useState('30');
+  const [markup, setMarkup] = useState('15');
   const [files, setFiles] = useState<File[]>([]);
   const [extracting, setExtracting] = useState(false);
   const [creating, setCreating] = useState(false);
