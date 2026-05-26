@@ -352,4 +352,5 @@ export interface CompanyDto {
   registeredAt: string;
   vatEffectiveDate: string | null;
   capital: string | null;
+  defaultMarkupPercent: number;
 }

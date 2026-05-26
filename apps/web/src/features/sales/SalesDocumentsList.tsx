@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { DocumentStatus } from '@hj/shared-types';
@@ -26,7 +26,13 @@ interface Doc {
   reference: string | null;
 }
 
-export function SalesDocumentsList({ meta }: { meta: DocTypeMeta }) {
+export function SalesDocumentsList({
+  meta,
+  extraActions,
+}: {
+  meta: DocTypeMeta;
+  extraActions?: ReactNode;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [items, setItems] = useState<Doc[]>([]);
@@ -78,14 +84,17 @@ export function SalesDocumentsList({ meta }: { meta: DocTypeMeta }) {
               เลขเริ่มต้น {meta.prefix}-2569-XXXX · DRAFT แก้ไขได้, USER_CONFIRMED ขึ้นไป ล็อกเลข
             </p>
           </div>
-          {canCreate && (
-            <Link
-              href={meta.newHref as any}
-              className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
-            >
-              + สร้าง{meta.shortTitle}ใหม่
-            </Link>
-          )}
+          <div className="flex items-center gap-2">
+            {extraActions}
+            {canCreate && (
+              <Link
+                href={meta.newHref as any}
+                className="rounded-md bg-brand-gradient px-4 py-2 text-[13px] font-medium text-white shadow-md"
+              >
+                + สร้าง{meta.shortTitle}ใหม่
+              </Link>
+            )}
+          </div>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">

@@ -28,6 +28,7 @@ import { BankModule } from './bank/bank.module';
 import { HealthModule } from './health/health.module';
 import { ReportsModule } from './reports/reports.module';
 import { SystemModule } from './system/system.module';
+import { FromReceiptsModule } from './sales/from-receipts/from-receipts.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { SystemModule } from './system/system.module';
     HealthModule,
     ReportsModule,
     SystemModule,
+    FromReceiptsModule,
   ],
   providers: [
     {

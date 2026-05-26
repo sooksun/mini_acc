@@ -16,10 +16,12 @@ type FormState = {
   email: string;
   brandShort: string;
   tagline: string;
+  defaultMarkupPercent: string;
 };
 
 const empty: FormState = {
   nameTh: '', nameEn: '', address: '', phone: '', email: '', brandShort: '', tagline: '',
+  defaultMarkupPercent: '30',
 };
 
 export default function CompanySettingsPage() {
@@ -40,6 +42,7 @@ export default function CompanySettingsPage() {
         nameTh: c.nameTh, nameEn: c.nameEn ?? '', address: c.address,
         phone: c.phone ?? '', email: c.email ?? '',
         brandShort: c.brandShort ?? '', tagline: c.tagline ?? '',
+        defaultMarkupPercent: String(c.defaultMarkupPercent),
       });
     } catch (e: any) {
       setError(e.message);
@@ -62,6 +65,8 @@ export default function CompanySettingsPage() {
           email: form.email || undefined,
           brandShort: form.brandShort || undefined,
           tagline: form.tagline || undefined,
+          defaultMarkupPercent:
+            form.defaultMarkupPercent === '' ? undefined : Number(form.defaultMarkupPercent),
         }),
       });
       setCompany(next);
@@ -81,6 +86,7 @@ export default function CompanySettingsPage() {
       nameTh: company.nameTh, nameEn: company.nameEn ?? '', address: company.address,
       phone: company.phone ?? '', email: company.email ?? '',
       brandShort: company.brandShort ?? '', tagline: company.tagline ?? '',
+      defaultMarkupPercent: String(company.defaultMarkupPercent),
     });
     setEditing(false);
     setError(null);
@@ -158,6 +164,9 @@ export default function CompanySettingsPage() {
             <Field label="VAT มีผลตั้งแต่" editing={false}
               value="" onChange={() => {}}
               display={company.vatEffectiveDate ? formatThaiDate(company.vatEffectiveDate) : 'ยังไม่จดทะเบียน VAT'} />
+            <Field label="Markup เริ่มต้น (%)" editing={editing} type="number"
+              value={form.defaultMarkupPercent} onChange={(v) => setForm({ ...form, defaultMarkupPercent: v })}
+              display={`${company.defaultMarkupPercent}% — ใช้คำนวณราคาขายตอนสร้างใบเสนอราคาจากใบเสร็จซื้อ`} />
 
             {editing && (
               <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">

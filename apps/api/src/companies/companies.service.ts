@@ -25,6 +25,7 @@ export class CompaniesService {
       registeredAt: c.registeredAt.toISOString(),
       vatEffectiveDate: c.vatEffectiveDate ? c.vatEffectiveDate.toISOString() : null,
       capital: c.capital ? c.capital.toString() : null,
+      defaultMarkupPercent: c.defaultMarkupPercent.toNumber(),
     };
   }
 
