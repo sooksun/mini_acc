@@ -79,6 +79,7 @@ const NAV: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: '/settings/company', label: 'ตั้งค่าบริษัท' },
+      { href: '/settings/markup', label: 'Markup เริ่มต้น', roles: ['OWNER'] },
       { href: '/settings/users', label: 'ผู้ใช้และสิทธิ์' },
       { href: '/settings/document-numbering', label: 'เลขเอกสาร' },
       { href: '/settings/audit-log', label: 'บันทึกการตรวจสอบ' },
