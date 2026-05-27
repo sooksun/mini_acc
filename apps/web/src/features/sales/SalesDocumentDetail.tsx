@@ -1,18 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { DocumentStatus, DocumentType } from '@hj/shared-types';
+import type { DocumentStatus, DocumentType, PaymentMethod } from '@hj/shared-types';
 import { AppTopbar } from '@/components/AppTopbar';
 import { Spinner } from '@/components/ui/Spinner';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Money } from '@/components/ui/Money';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Modal } from '@/components/ui/Modal';
+import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { useToast } from '@/components/ui/Toast';
 import { api, apiBlob } from '@/lib/api';
-import { formatThaiDate, formatThaiDateTime, numberToThaiBahtText } from '@/lib/format';
+import {
+  formatThaiCurrency,
+  formatThaiDate,
+  formatThaiDateTime,
+  localDateString,
+  numberToThaiBahtText,
+} from '@/lib/format';
 import { getUser } from '@/lib/auth';
 import { DOC_TYPE_META, type DocTypeMeta } from './doc-type-meta';
+
+const METHOD_LABEL: Record<PaymentMethod, string> = {
+  CASH: 'เงินสด',
+  BANK_TRANSFER: 'โอนธนาคาร',
+  CHEQUE: 'เช็ค',
+  CREDIT_CARD: 'บัตรเครดิต',
+  PROMPT_PAY: 'พร้อมเพย์',
+  OTHER: 'อื่น ๆ',
+};
 
 interface Item {
   id: string;
@@ -33,8 +50,25 @@ interface ChainRef {
   status: DocumentStatus;
 }
 
+interface SettlementPayment {
+  id: string;
+  paymentDate: string;
+  amount: string;
+  whtAmount: string;
+  method: PaymentMethod;
+  reference: string | null;
+}
+
+interface Settlement {
+  paid: boolean;
+  paidAmount: string;
+  outstanding: string;
+  payments: SettlementPayment[];
+}
+
 interface SalesDoc {
   id: string;
+  customerId: string;
   type: DocumentType;
   number: string;
   status: DocumentStatus;
@@ -63,6 +97,7 @@ interface SalesDoc {
   pdfPath: string | null;
   parentDocument: ChainRef | null;
   childDocuments: ChainRef[];
+  settlement?: Settlement;
   createdAt: string;
   updatedAt: string;
 }
@@ -80,6 +115,7 @@ export function SalesDocumentDetail({
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [voidOpen, setVoidOpen] = useState(false);
+  const [settleOpen, setSettleOpen] = useState(false);
 
   const role = getUser()?.role;
   const canEdit = doc?.status === 'DRAFT' && (role === 'OWNER' || role === 'ADMIN');
@@ -105,6 +141,17 @@ export function SalesDocumentDetail({
   const childInvoice = doc?.childDocuments.find(
     (c) => c.type === 'INVOICE' && c.status !== 'VOIDED',
   );
+  // "รับชำระเงิน": invoices/tax-invoices post Dr ลูกหนี้(AR) at confirm — once
+  // confirmed (and not yet settled) the customer's payment can be recorded,
+  // which clears the AR. Single full payment model: the button hides once a
+  // non-voided payment is linked back to this document.
+  const isArDoc = doc?.type === 'INVOICE' || doc?.type === 'TAX_INVOICE';
+  const canSettle =
+    !!doc &&
+    isArDoc &&
+    ['USER_CONFIRMED', 'ACCOUNTED', 'LOCKED'].includes(doc.status) &&
+    !doc.settlement?.paid &&
+    (role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT');
 
   async function load() {
     setLoading(true);
@@ -333,6 +380,14 @@ export function SalesDocumentDetail({
                 ลงบัญชี
               </button>
             )}
+            {canSettle && (
+              <button
+                onClick={() => setSettleOpen(true)}
+                className="rounded-md border border-ok/50 bg-ok/10 px-4 py-2 text-[13px] font-semibold text-ok hover:bg-ok/20"
+              >
+                รับชำระเงิน
+              </button>
+            )}
             {canVoid && (
               <button
                 onClick={() => setVoidOpen(true)}
@@ -445,6 +500,52 @@ export function SalesDocumentDetail({
               <div className="mt-2 rounded-md bg-surface-2 px-3 py-2 text-[11.5px] text-text-mute">
                 ({numberToThaiBahtText(doc.netReceived)})
               </div>
+
+              {isArDoc && (
+                <div className="mt-4 border-t border-border pt-4">
+                  <h3 className="mb-2 text-[13px] font-semibold text-text-soft">การรับชำระ</h3>
+                  {doc.settlement?.paid ? (
+                    <div className="space-y-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-ok/40 bg-ok/10 px-2 py-1 text-[12px] font-medium text-ok">
+                        ✓ รับชำระแล้ว
+                      </span>
+                      {doc.settlement.payments.map((p) => (
+                        <div
+                          key={p.id}
+                          className="rounded-md bg-surface-2 px-3 py-2 text-[12px]"
+                        >
+                          <div className="flex justify-between">
+                            <span className="text-text-mute">
+                              {formatThaiDate(p.paymentDate)}
+                            </span>
+                            <span className="font-mono">
+                              {formatThaiCurrency(Number(p.amount))}
+                            </span>
+                          </div>
+                          <div className="mt-0.5 text-[11.5px] text-text-mute">
+                            {METHOD_LABEL[p.method]}
+                            {p.reference ? ` · ${p.reference}` : ''}
+                            {Number(p.whtAmount) > 0
+                              ? ` · หัก ณ ที่จ่าย ${formatThaiCurrency(Number(p.whtAmount))}`
+                              : ''}
+                          </div>
+                        </div>
+                      ))}
+                      <Link
+                        href="/payments"
+                        className="inline-block text-[12px] text-brand hover:underline"
+                      >
+                        ดูในรับ/จ่ายเงิน →
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="text-[12.5px] text-text-mute">
+                      ยังไม่ได้รับชำระ
+                      {doc.status === 'DRAFT' ? ' — ยืนยันเอกสารก่อนจึงจะรับชำระได้' : ''}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </aside>
         </div>
@@ -469,7 +570,209 @@ export function SalesDocumentDetail({
         onConfirm={handleVoid}
         onClose={() => setVoidOpen(false)}
       />
+
+      {doc && (
+        <RecordPaymentModal
+          open={settleOpen}
+          onClose={() => setSettleOpen(false)}
+          doc={doc}
+          onSaved={() => {
+            setSettleOpen(false);
+            load();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function RecordPaymentModal({
+  open,
+  onClose,
+  onSaved,
+  doc,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  doc: SalesDoc;
+}) {
+  const toast = useToast();
+  const [paymentDate, setPaymentDate] = useState('');
+  const [amount, setAmount] = useState('');
+  const [whtAmount, setWhtAmount] = useState('');
+  const [method, setMethod] = useState<PaymentMethod>('BANK_TRANSFER');
+  const [reference, setReference] = useState('');
+  const [whtCertNumber, setWhtCertNumber] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setPaymentDate(localDateString());
+      // Single full-payment model: prefill the full receivable + the invoice's
+      // WHT so the journal clears AR exactly (Dr Cash + Dr WHT Receivable = Cr AR).
+      setAmount(doc.grandTotal);
+      setWhtAmount(Number(doc.whtAmount) > 0 ? doc.whtAmount : '');
+      setMethod('BANK_TRANSFER');
+      setReference(doc.number);
+      setWhtCertNumber('');
+      setNote('');
+    }
+  }, [open, doc]);
+
+  const amountNum = Number(amount) || 0;
+  const whtNum = Number(whtAmount) || 0;
+  const cashIn = Math.max(0, amountNum - whtNum);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (amountNum <= 0) {
+      toast.error('ยอดเงินต้องมากกว่า 0');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api('/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          direction: 'IN',
+          partnerId: doc.customerId,
+          paymentDate,
+          amount,
+          whtAmount: whtAmount || undefined,
+          method,
+          reference: reference.trim() || undefined,
+          whtCertNumber: whtCertNumber.trim() || undefined,
+          sourceType: 'SALES_DOCUMENT',
+          sourceId: doc.id,
+          note: note.trim() || undefined,
+        }),
+      });
+      toast.success('รับชำระเงินแล้ว');
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message ?? 'บันทึกล้มเหลว');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`รับชำระเงิน — ${doc.number}`}
+      size="lg"
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-border px-4 py-2 text-[13px]"
+          >
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            form="record-payment-form"
+            disabled={saving}
+            className="rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white disabled:opacity-60"
+          >
+            {saving ? 'กำลังบันทึก…' : 'บันทึกรับชำระ'}
+          </button>
+        </>
+      }
+    >
+      <form id="record-payment-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-md border border-border bg-surface-2 px-3 py-2 text-[13px] md:col-span-2">
+          <span className="text-text-mute">ลูกค้า:</span>{' '}
+          <span className="font-medium">{doc.customer.nameTh}</span>
+        </div>
+
+        <label>
+          <span className="mb-1 block text-[12.5px] text-text-soft">วันที่รับชำระ</span>
+          <ThaiDatePicker value={paymentDate} onChange={setPaymentDate} />
+        </label>
+
+        <label>
+          <span className="mb-1 block text-[12.5px] text-text-soft">วิธีรับชำระ</span>
+          <select
+            value={method}
+            onChange={(e) => setMethod(e.target.value as PaymentMethod)}
+            className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+          >
+            {Object.entries(METHOD_LABEL).map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span className="mb-1 block text-[12.5px] text-text-soft">ยอดรับชำระ (บาท)</span>
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            required
+            inputMode="decimal"
+            className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-right font-mono text-[14px] outline-none focus:border-brand"
+          />
+        </label>
+
+        <label>
+          <span className="mb-1 block text-[12.5px] text-text-soft">
+            หัก ณ ที่จ่าย (บาท) — เว้นว่างถ้าไม่มี
+          </span>
+          <input
+            value={whtAmount}
+            onChange={(e) => setWhtAmount(e.target.value)}
+            inputMode="decimal"
+            className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-right font-mono text-[14px] outline-none focus:border-brand"
+          />
+        </label>
+
+        <div className="rounded-md border border-info/30 bg-info/5 p-3 text-[12.5px] text-text-soft md:col-span-2">
+          <div className="flex justify-between">
+            <span>ยอดเต็มใบ</span>
+            <span className="font-mono">{formatThaiCurrency(amountNum)}</span>
+          </div>
+          {whtNum > 0 && (
+            <div className="flex justify-between text-warn">
+              <span>หัก ณ ที่จ่าย</span>
+              <span className="font-mono">- {formatThaiCurrency(whtNum)}</span>
+            </div>
+          )}
+          <div className="mt-1 flex justify-between border-t border-info/20 pt-1 font-medium">
+            <span>รับเงินจริง</span>
+            <span className="font-mono">{formatThaiCurrency(cashIn)}</span>
+          </div>
+        </div>
+
+        {whtNum > 0 && (
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-[12.5px] text-text-soft">
+              เลขที่หนังสือรับรองหัก ณ ที่จ่าย (50 ทวิ) — ถ้ามี
+            </span>
+            <input
+              value={whtCertNumber}
+              onChange={(e) => setWhtCertNumber(e.target.value)}
+              className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+            />
+          </label>
+        )}
+
+        <label className="md:col-span-2">
+          <span className="mb-1 block text-[12.5px] text-text-soft">หมายเหตุ</span>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            className="min-h-16 w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand"
+          />
+        </label>
+      </form>
+    </Modal>
   );
 }
 

@@ -3,6 +3,7 @@ import { ReceiptsService } from './receipts.service';
 import { ReceiptTaxInvoicesService } from './receipt-tax-invoices.service';
 import { QuotationsService } from './quotations.service';
 import { SalesDocumentService } from './_shared/sales-document.service';
+import { PaymentsService } from '../payments/payments.service';
 import {
   bootstrapTestEnv,
   teardownTestEnv,
@@ -48,6 +49,7 @@ describe('Sales document → journal posting (integration)', () => {
   let receiptTax: ReceiptTaxInvoicesService;
   let quotations: QuotationsService;
   let salesDoc: SalesDocumentService;
+  let payments: PaymentsService;
 
   beforeAll(async () => {
     env = await bootstrapTestEnv();
@@ -56,6 +58,7 @@ describe('Sales document → journal posting (integration)', () => {
     receiptTax = env.app.get(ReceiptTaxInvoicesService);
     quotations = env.app.get(QuotationsService);
     salesDoc = env.app.get(SalesDocumentService);
+    payments = env.app.get(PaymentsService);
   });
 
   afterAll(async () => {
@@ -183,5 +186,65 @@ describe('Sales document → journal posting (integration)', () => {
     const second = await salesDoc.backfillRevenueJournals(env.seed.companyId, env.seed.userId);
     expect(second.posted).toBe(0);
     expect(await salesEntry(env, draft.id)).toHaveLength(1);
+  });
+
+  it('settlement: a SALES_DOCUMENT-linked payment surfaces in findOne and clears the receivable', async () => {
+    const draft = await invoices.create(
+      env.seed.companyId,
+      env.seed.userId,
+      baseDoc(env.seed.customerId, env.seed.productId),
+    );
+    await invoices.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id);
+
+    // Before payment: unsettled, outstanding = grandTotal (1070).
+    const before = await salesDoc.findOne('INVOICE', env.seed.companyId, draft.id);
+    expect(before.settlement.paid).toBe(false);
+    expect(num(before.settlement.outstanding)).toBe(1070);
+    expect(before.settlement.payments).toHaveLength(0);
+
+    // Record the customer's payment linked back to the invoice.
+    await payments.create(env.seed.companyId, env.seed.userId, {
+      direction: 'IN',
+      partnerId: env.seed.customerId,
+      paymentDate: '2026-05-12',
+      amount: '1070',
+      sourceType: 'SALES_DOCUMENT',
+      sourceId: draft.id,
+    });
+
+    // After: settled, payment surfaced, outstanding 0.
+    const after = await salesDoc.findOne('INVOICE', env.seed.companyId, draft.id);
+    expect(after.settlement.paid).toBe(true);
+    expect(num(after.settlement.paidAmount)).toBe(1070);
+    expect(num(after.settlement.outstanding)).toBe(0);
+    expect(after.settlement.payments).toHaveLength(1);
+  });
+
+  it('settlement: a voided linked payment is excluded (document returns to unsettled)', async () => {
+    const draft = await invoices.create(
+      env.seed.companyId,
+      env.seed.userId,
+      baseDoc(env.seed.customerId, env.seed.productId),
+    );
+    await invoices.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id);
+    const payment = await payments.create(env.seed.companyId, env.seed.userId, {
+      direction: 'IN',
+      partnerId: env.seed.customerId,
+      paymentDate: '2026-05-12',
+      amount: '1070',
+      sourceType: 'SALES_DOCUMENT',
+      sourceId: draft.id,
+    });
+    expect((await salesDoc.findOne('INVOICE', env.seed.companyId, draft.id)).settlement.paid).toBe(
+      true,
+    );
+
+    await payments.voidPayment(env.seed.companyId, env.seed.userId, 'OWNER', payment.id, {
+      reason: 'รับเงินผิดใบ',
+    });
+
+    const after = await salesDoc.findOne('INVOICE', env.seed.companyId, draft.id);
+    expect(after.settlement.paid).toBe(false);
+    expect(num(after.settlement.outstanding)).toBe(1070);
   });
 });

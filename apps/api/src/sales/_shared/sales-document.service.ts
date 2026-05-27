@@ -686,7 +686,49 @@ export class SalesDocumentService {
       },
     });
     if (!doc) throw new NotFoundException('Document not found');
-    return this.toDto(doc);
+
+    // Settlement — payments linked back to this document via
+    // (sourceType=SALES_DOCUMENT, sourceId). Voided payments are excluded. The
+    // document's receivable (Dr ลูกหนี้) equals grandTotal, so
+    // outstanding = grandTotal − Σ(linked payment amount).
+    const linkedPayments = await this.prisma.payment.findMany({
+      where: {
+        companyId,
+        sourceType: 'SALES_DOCUMENT',
+        sourceId: id,
+        status: { not: 'VOIDED' },
+      },
+      orderBy: { paymentDate: 'asc' },
+      select: {
+        id: true,
+        paymentDate: true,
+        amount: true,
+        whtAmount: true,
+        method: true,
+        reference: true,
+      },
+    });
+    const paidAmount = linkedPayments.reduce(
+      (sum, p) => sum.plus(p.amount),
+      new Prisma.Decimal(0),
+    );
+
+    return {
+      ...this.toDto(doc),
+      settlement: {
+        paid: linkedPayments.length > 0,
+        paidAmount: paidAmount.toString(),
+        outstanding: doc.grandTotal.minus(paidAmount).toString(),
+        payments: linkedPayments.map((p) => ({
+          id: p.id,
+          paymentDate: p.paymentDate.toISOString(),
+          amount: p.amount.toString(),
+          whtAmount: p.whtAmount.toString(),
+          method: p.method,
+          reference: p.reference,
+        })),
+      },
+    };
   }
 
   async list(type: DocumentType, companyId: string, query: ListSalesDocumentsQuery) {
