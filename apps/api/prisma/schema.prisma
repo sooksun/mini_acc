@@ -932,9 +932,12 @@ model JournalEntryLine {
 
   @@unique([journalEntryId, lineNumber])
   @@index([journalEntryId])
-  @@index([accountCode])
-  @@index([partnerId])
-  @@index([projectId])
+  // No line-level index on accountCode/partnerId/projectId: lines are always
+  // loaded via the parent JournalEntry relation and filtered in JS (reports,
+  // journal list, accountant-pack). No query filters lines directly by these
+  // columns, so such indexes were pure write-side dead weight on this
+  // fast-growing table. Re-add a composite (scoping column first) only when a
+  // query that filters lines directly is actually introduced.
 }
 
 model AccountingPeriod {
