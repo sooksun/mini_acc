@@ -147,7 +147,7 @@ export class BankService {
   }
 
   private parseCsvToLines(buffer: Buffer): BankStatementLineInput[] {
-    const text = buffer.toString('utf8').replace(/^﻿/, '');
+    const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
     const rows = parseCsvText(text);
     if (rows.length < 2) return [];
 

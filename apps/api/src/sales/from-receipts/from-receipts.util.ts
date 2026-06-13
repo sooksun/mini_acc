@@ -11,7 +11,7 @@ export function normalizeName(name: string): string {
   return name
     .trim()
     .toLowerCase()
-    .replace(/[._\-]+/g, ' ')
+    .replace(/[._-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

@@ -86,7 +86,7 @@ export class PdfGenerationService {
       throw new NotFoundException('PDF not generated yet');
     }
     const buffer = await fs.readFile(doc.pdfPath);
-    const safeNum = doc.number.replace(/[^A-Za-z0-9_\-]/g, '_');
+    const safeNum = doc.number.replace(/[^A-Za-z0-9_-]/g, '_');
     return { buffer, fileName: `${safeNum}.pdf` };
   }
 

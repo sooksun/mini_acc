@@ -785,7 +785,7 @@ function ReviewModal({
 
           {hasErrors && (
             <div className="rounded-md border border-bad/40 bg-bad/5 p-3 text-[12.5px] text-bad">
-              พบ {Object.keys(errors).length} ฟิลด์ที่ยังไม่ถูกต้อง — แก้ไขก่อนกด "รับและสร้างใบเสร็จ"
+              พบ {Object.keys(errors).length} ฟิลด์ที่ยังไม่ถูกต้อง — แก้ไขก่อนกด &quot;รับและสร้างใบเสร็จ&quot;
             </div>
           )}
         </div>
