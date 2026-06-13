@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 pnpm workspace with three packages: `apps/api` (NestJS), `apps/web` (Next.js 15 App Router), `packages/shared-types`.
 
-Phase 0 (Foundation) is done. Phase 1 (Sales + PDF) is in progress — the API has all six sales document types (`QUOTATION / DELIVERY_NOTE / INVOICE / RECEIPT / TAX_INVOICE / RECEIPT_TAX_INVOICE`) wired through `SalesDocumentService → NumberingService → DocumentLifecycleService`, plus `PdfGenerationService` (preview synchronous, generate via BullMQ). The web app has login + `(app)` group with sidebar and sales pages.
+Phase 0 (Foundation) and Phase 1 (Sales + PDF) are done. The API has all six sales document types (`QUOTATION / DELIVERY_NOTE / INVOICE / RECEIPT / TAX_INVOICE / RECEIPT_TAX_INVOICE`) wired through `SalesDocumentService → NumberingService → lifecycle`, plus `PdfGenerationService` (preview synchronous, generate via BullMQ). The web app has login + `(app)` group with sidebar covering sales, expenses, payments, bank, tax, projects, inventory, assets, risks, closing, accountant-pack, and settings.
+
+Built since Phase 1 (commit `d3a71dd`, 2026-05-21): **sales documents post to the Journal at `confirm()` and the P&L report reads from the Journal** (see "Sales & ledger" below); month-end closing locks documents + enforces the §17.4 hard-blocks; Projects module (`/projects` + `/projects/:id/profit`); risk detectors `DUPLICATE_DOCUMENT` + `STOCK_NEGATIVE`; Accountant Pack persisted as `ExportBatch` (re-downloadable); bank statement CSV import; quotation→invoice convert button + project picker on the sales form; PND.54 (ภ.ง.ด.54) DTA rate table + auto-suggest + foreign WHT certificate.
 
 **Git repo initialized.** Remote: `https://github.com/sooksun/mini_acc.git`. Production is live at `https://accounting.cnppai.com`.
 
@@ -68,25 +70,47 @@ After seeding, log in with `owner@solutionsnextgen.co.th / owner123!` (OWNER) or
 ## Workspace layout
 
 ```
-apps/api/src/
+apps/api/src/              27 feature folders — grouped below by the 6 bounded contexts they'll regroup into
   app.module.ts             root module (registers AuditLogInterceptor globally)
   main.ts                   bootstrap (helmet, validation pipe, /api prefix)
-  prisma/                   PrismaService + module
-  auth/                     JWT login, JwtAuthGuard, JwtStrategy
+  # Identity & infra
+  auth/                     JWT login, JwtAuthGuard, JwtStrategy → /api/auth
   common/                   @CurrentUser, @Roles, RolesGuard
-  audit-log/                AuditLogInterceptor + @AuditAction decorator (controller-level only)
-  companies/                /api/companies
-  users/                    user lookup (no controller yet)
-  partners/                 customers + vendors (PartnerType discriminator)
-  products/                 catalog
-  numbering/                NumberingService (allocate inside tx, peek without)
-  lifecycle/                TRANSITIONS registry + validateTransition helper
-  sales/                    6 doc-type controllers, each delegates to a thin per-type service
-    _shared/sales-document.service.ts   shared CRUD + confirm/void + totals + VAT-eligibility
-  pdf/                      PdfRendererService (Playwright), PdfTemplateService,
-                            PdfGenerationService (preview + enqueue), PdfJobProcessor
-  prisma/schema.prisma      10 models + 7 enums (see PRD §19)
-  prisma/seed.ts            company + 2 users + 6 numbering rules + sample partner/product
+  audit-log/                AuditLogInterceptor + @AuditAction decorator (controller-level only) → /api/audit-logs
+  companies/                company settings → /api/company
+  users/                    user CRUD + OWNER-protection guard → /api/users
+  health/                   liveness probe → /api/health
+  prisma/                   PrismaService + module
+  # Master data
+  partners/                 customers + vendors (PartnerType discriminator) → /api/partners
+  products/                 catalog → /api/products
+  numbering/                NumberingService (allocate inside tx, peek without) → /api/numbering
+  lifecycle/                TRANSITIONS registry + validateTransition helper → /api/lifecycle
+  # Documents
+  sales/                    6 doc-type controllers (sales/{quotations,delivery-notes,invoices,receipts,tax-invoices,receipt-tax-invoices}), each a thin per-type service
+    _shared/sales-document.service.ts   shared CRUD + confirm/void + totals + VAT-eligibility + postRevenueJournal
+    from-receipts/          build a quotation/invoice from an expense receipt → /api/sales/from-receipts
+  pdf/                      PdfRendererService (Playwright), PdfGenerationService (preview + enqueue), PdfJobProcessor → /api/sales-pdf/:type
+  ai/                       AI Inbox — AiSuggestion lifecycle → /api/ai-inbox
+  expense-receipts/         purchase/expense receipts + PP.36/PND.54 foreign tax + prepaid → /api/expense-receipts
+  # Money
+  journal/                  JournalService.postWithTx + accounts.ts (ACCOUNTS chart of accounts) → /api/journal
+  payments/                 receipts settle invoices, clear AR → /api/payments
+  reports/                  P&L read from the journal → /api/reports
+  projects/                 project CRUD + profit → /api/projects
+  inventory/                stock movements → /api/inventory
+  fixed-assets/             assets + depreciation → /api/fixed-assets
+  bank/                     bank statement import + reconciliation → /api/bank
+  # Compliance & period
+  tax/                      VAT/WHT dashboards + ภ.ง.ด.3/53/54 + 50-ทวิ → /api/tax
+  risks/                    AI Risk Center detectors → /api/risks
+  closing/                  ClosingService — month-end lock + §17.4 hard-blocks → /api/closing
+  accountant-pack/          ExportBatch ZIP (re-downloadable) → /api/accountant-pack
+  system/                   OWNER maintenance (backfill-sales-journals) → /api/system
+
+apps/api/prisma/
+  schema.prisma             31 models + 34 enums (see PRD §19)
+  seed.ts                   company + 2 users + 6 numbering rules + sample partner/product + ForeignWhtRate DTA table
 
 apps/web/src/
   app/
@@ -94,15 +118,15 @@ apps/web/src/
     login/                  /login
     (app)/                  authed group — checks token, redirects to /login if missing
       layout.tsx            sidebar + main, ToastProvider
-      dashboard/            /dashboard
-      sales/{quotations,delivery-notes,invoices,receipts,tax-invoices,receipt-tax-invoices}/
-      customers/  vendors/  products/  settings/
+      dashboard/  sales/{quotations,delivery-notes,invoices,receipts,tax-invoices,receipt-tax-invoices}/
+      customers/  vendors/  products/  expenses/  payments/  bank/  inventory/  assets/
+      projects/  tax/  wht-certificates/  risks/  closing/  accountant-pack/  profit-loss/  ai-inbox/  settings/
   components/
     AppSidebar.tsx, AppTopbar.tsx, ThemeToggle.tsx
-    ui/                     Modal, ConfirmDialog, StatusBadge, Money, Pickers, Toast, Spinner, Empty
+    ui/                     Modal, ConfirmDialog, StatusBadge, Money, Pickers, Toast, Spinner, Empty, ThaiDatePicker
   features/
     sales/                  SalesDocumentForm, SalesDocumentDetail, SalesDocumentsList, doc-type-meta
-    partners/  products/
+    partners/  products/  expenses/
   lib/
     api.ts                  fetch wrapper — reads NEXT_PUBLIC_API_URL, attaches Bearer, throws ApiError
     auth.ts                 token + user in localStorage
@@ -147,9 +171,16 @@ The `AI_AGENT` role can read, extract, suggest, and flag risks. It **cannot** co
 - Every state transition writes to `AuditLog` with reason where applicable (`VOID` requires a reason).
 
 ### Money & accounting integrity
-- Journal entries must satisfy `Dr === Cr` server-side; reject otherwise.
-- Period close is blocked when any `CRITICAL` risk is open, journal is unbalanced, sales document numbers collide, stock is negative, or invoices are receipted-but-unmatched (PRD §17.4).
+- Journal entries must satisfy `Dr === Cr` server-side; reject otherwise (`JournalService.postWithTx`).
+- Period close (`ClosingService`) is blocked by the PRD §17.4 hard-blocks — all computed directly (NOT via dismissable risks): journal unbalanced, open `CRITICAL` risk, duplicate sales doc numbers (`DUPLICATE_DOC_NUMBER`), negative stock (`STOCK_NEGATIVE`), unmatched bank lines in period (`UNMATCHED_BANK`), invoice received-but-no-receipt (`INVOICE_RECEIVED_NO_RECEIPT`, dormant until payments link to invoices). `close()` also bulk-locks the period's sales docs to `LOCKED` in one tx (the one sanctioned place that sets status without `validateTransition` — period authority, §15.4).
 - Project-cost expenses must carry a `projectId`. Stock-out movements must validate available stock.
+
+### Sales & ledger (Journal is the source of truth — PRD §7.2)
+- **Sales documents post to the Journal at `confirm()`** via `SalesDocumentService.postRevenueJournal` (sourceType `SALES_DOCUMENT`). Only revenue-recognition docs post — `INVOICE`/`TAX_INVOICE` always; `RECEIPT`/`RECEIPT_TAX_INVOICE` only when standalone (`parentDocumentId === null`, i.e. cash sale). QT/DN and receipts that close an invoice post nothing (cash collection is the Payments module's job, clearing AR).
+- Posting: AR docs → `Dr ลูกหนี้ (1130)`; cash docs → `Dr เงินสด (1110)` + `Dr ภาษีถูกหัก ณ ที่จ่าย (1152)`; both → `Cr รายได้ (4110 service / 4120 sale, by item product type)` + `Cr ภาษีขาย (2151)` when VAT. `void()` voids the linked journal entry too.
+- **`reports.service` (P&L) reads from the Journal**, not document tables: revenue = credits to `4xxx`, expense = debits to `5xxx`, gross adds VAT (`2151`/`1151`). Never revert it to read `salesDocument`/`expenseRecord` directly — that breaks the §7.2 traceability and silently drops depreciation/prepaid amortization.
+- Chart of accounts lives in `apps/api/src/journal/accounts.ts` (`ACCOUNTS`). Expenses/payments already posted to the journal before this; sales were the missing half.
+- **One-time backfill** for docs confirmed before journal wiring existed: `POST /api/system/backfill-sales-journals` (OWNER, idempotent). Must run once on prod after deploying the journal change, or historical sales revenue won't appear in journal-based reports.
 
 ### Tax safety
 - `TAX_INVOICE` may only be issued when the document date is on/after `Company.vatEffectiveDate`. Enforced in `SalesDocumentService.assertVatEligible()` — throws 422 `VAT_NOT_EFFECTIVE`.
@@ -214,7 +245,7 @@ When implementing, default to **PRD** semantics unless the user overrides — bu
 
 ## Bounded contexts (Phase 2 refactor)
 
-`apps/api/src/` already has 13 top-level folders (audit-log, auth, common, companies, lifecycle, numbering, partners, pdf, prisma, products, sales, users — plus app/main). The PRD threshold (>10) is hit. **The flat layout is intentional for now** — regroup into the 6 contexts (**Identity → MasterData → Documents → Money → Compliance → Period**, plus cross-cutting `ai/` and `jobs/`) as a one-time ~2hr task once Phase 1 ships. Don't preemptively refactor in feature work.
+`apps/api/src/` now has **27 top-level feature folders** — well past the PRD threshold (>10). **The flat layout is still intentional** — regroup into the 6 contexts (**Identity → MasterData → Documents → Money → Compliance → Period**, plus cross-cutting `ai/` and `jobs/`) as a one-time half-day task when someone can do it cleanly, not piecemeal during feature work. The Workspace-layout tree above already annotates each folder with its target context.
 
 Dependency rule when refactoring: A → B → C → D → E → F (no cycles, no skip-level cross-context imports).
 
@@ -235,7 +266,7 @@ Dependency rule when refactoring: A → B → C → D → E → F (no cycles, no
 ## MVP scope
 
 - **Phase 0** (Foundation): scaffold, design tokens, auth + users + company settings + audit log, Thai date + Baht text utilities. **Done.**
-- **Phase 1** (Sales + PDF): customers, products, document numbering, QT → INV → DN → RC/RT state machine + numbering + immutability, Playwright HTML→PDF for all 6 doc types with theme + signature blocks (per-type metadata is hardcoded in `pdf-templates/meta.ts`; per-company `DocumentTemplate` table was removed pending Settings UI), basic dashboard. **In progress** — sales CRUD and PDF preview/queue are wired; remaining work is the actual HTML templates per type, frontend polish, and end-to-end golden path.
+- **Phase 1** (Sales + PDF): customers, products, document numbering, QT → INV → DN → RC/RT state machine + numbering + immutability, Playwright HTML→PDF for all 6 doc types with theme + signature blocks (per-type metadata is hardcoded in `pdf-templates/meta.ts`; per-company `DocumentTemplate` table was removed pending Settings UI), basic dashboard. **Done** — plus sales→journal posting, P&L from journal, and the post-Phase-1 modules listed in Project status.
 
 **Ship target**: replace the customer's Word/Excel quotation+receipt workflow. AI Inbox / Expense / Bank / Risk / Closing are explicitly deferred to later phases.
 
@@ -262,7 +293,9 @@ Read these to understand the intended UI before recreating it in Next.js:
 
 Eighteen modules total. Listed here so you can sequence work without re-reading the PRD: Auth, Company Settings, Users & Roles, Partners, Document Upload & Attachments, AI Document Inbox, Sales Documents, Purchase/Expense, Payments, Projects, Inventory, Fixed Assets, VAT/WHT, Journal, Bank Reconciliation, AI Risk Center, Month-End Closing, Accountant Pack. Sprint sequencing is in PRD §26.
 
-Done so far: Auth, Company Settings (read-only), Users & Roles (no UI), Partners (CUSTOMER/VENDOR), Sales Documents (all 6 types, lifecycle + numbering, PDF preview/queue), AI Inbox, Expenses/Receipts, Inventory, Assets, Bank Reconciliation stub, Risk Center stub, Closing, Accountant Pack stub.
+Done so far: Auth, Company Settings (read-only), Users & Roles, Partners (CUSTOMER/VENDOR), Sales Documents (all 6 types, lifecycle + numbering + journal posting, PDF preview/queue), AI Inbox, Expenses/Receipts (incl. PP.36 + PND.54 foreign tax + prepaid), Payments, Inventory, Assets, **Projects (CRUD + profit)**, Bank Reconciliation (JSON + CSV import + match), Risk Center (5/11 detectors: TAX_ID_MISSING, MISSING_DOCUMENT, journal-imbalance, DUPLICATE_DOCUMENT, STOCK_NEGATIVE), Closing (locks docs + §17.4 hard-blocks), Accountant Pack (ZIP + ExportBatch history/re-download), Journal (auto from sales/expense/payment), Reports (P&L from journal), Tax (VAT/WHT dashboards + ภ.ง.ด.3/53/54 summaries + 50-ทวิ/foreign certificate).
+
+Remaining risk detectors (6/11): VAT_RISK, WHT_RISK, UNMATCHED_BANK, LOW_PROFIT_PROJECT, EXPENSE_WITHOUT_APPROVAL, EDIT_AFTER_CONFIRM. No CRUD UI yet for the `ForeignWhtRate` (DTA) table — edit via seed/DB.
 
 ## Working in this directory
 
@@ -286,6 +319,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.production build api w
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --force-recreate --no-deps api web
 docker compose -f docker-compose.prod.yml --env-file .env.production logs -f --tail=50 api web
 ```
+
+**Post-deploy checklist (do NOT skip):**
+1. **Commit + push first.** If `git pull` on prod fetches nothing new, the Docker build is fully `CACHED` (incl. `COPY . .`) → the running container keeps the OLD code and you won't notice. A 100%-CACHED build = the change was never pushed.
+2. **Run pending migrations** — the api entrypoint runs `seed` on start but NOT necessarily `migrate deploy`. After deploying any schema change, run it explicitly (idempotent): `docker compose -f docker-compose.prod.yml --env-file .env.production exec api npx prisma migrate deploy`.
+3. **Seed** runs automatically on api start (idempotent upserts — won't touch existing users/company). Re-run manually with `... exec api npx prisma db seed` if needed (e.g. to refresh the `ForeignWhtRate` DTA table).
+4. **Backfill sales journals once** after the journal change: `curl -X POST https://accounting.cnppai.com/api/system/backfill-sales-journals -H "Authorization: Bearer <OWNER_TOKEN>"` — else historical sales revenue is missing from journal-based reports.
+5. The Accountant Pack ZIP is written under `ATTACHMENT_DIR` — keep it on a persisted docker volume (same as attachments/PDFs) or re-downloads vanish on container recreate.
 
 ## UI patterns (confirmed)
 
