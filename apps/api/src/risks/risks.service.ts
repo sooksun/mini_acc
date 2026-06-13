@@ -213,33 +213,55 @@ export class RisksService {
       }
     }
 
-    // Upsert each detected risk. Look up existing by (type, entityType, entityId).
-    // Existing row in any status: skip (human already saw it).
+    // Persist new findings. An existing row in ANY status (incl. RESOLVED /
+    // DISMISSED) is left untouched — we trust the human's prior decision.
+    //
+    // This used to be a per-risk findFirst+create (2 round-trips × N risks). On a
+    // messy month-end the detectors emit one risk per offending row, so a close
+    // screen that calls scan() on every load turned into dozens of sequential
+    // queries. Collapsed to two: one findMany to learn which keys already exist,
+    // one createMany for the genuinely-new ones.
+    const keyOf = (r: { type: string; entityType?: string | null; entityId?: string | null }) =>
+      `${r.type} ${r.entityType ?? ''} ${r.entityId ?? ''}`;
+
     let created = 0;
-    for (const risk of detected) {
-      const existing = await this.prisma.riskItem.findFirst({
+    if (detected.length > 0) {
+      const existing = await this.prisma.riskItem.findMany({
         where: {
           companyId,
-          type: risk.type,
-          entityType: risk.entityType ?? null,
-          entityId: risk.entityId ?? null,
+          OR: detected.map((r) => ({
+            type: r.type,
+            entityType: r.entityType ?? null,
+            entityId: r.entityId ?? null,
+          })),
         },
-        select: { id: true },
+        select: { type: true, entityType: true, entityId: true },
       });
-      if (existing) continue;
-      await this.prisma.riskItem.create({
-        data: {
-          companyId,
-          type: risk.type,
-          level: risk.level,
-          status: 'OPEN',
-          entityType: risk.entityType,
-          entityId: risk.entityId,
-          title: risk.title,
-          description: risk.description,
-        },
-      });
-      created++;
+      const seen = new Set(existing.map(keyOf));
+
+      const fresh: DetectedRisk[] = [];
+      for (const risk of detected) {
+        const k = keyOf(risk);
+        if (seen.has(k)) continue;
+        seen.add(k); // also dedupes within this batch
+        fresh.push(risk);
+      }
+
+      if (fresh.length > 0) {
+        const result = await this.prisma.riskItem.createMany({
+          data: fresh.map((risk) => ({
+            companyId,
+            type: risk.type,
+            level: risk.level,
+            status: 'OPEN',
+            entityType: risk.entityType,
+            entityId: risk.entityId,
+            title: risk.title,
+            description: risk.description,
+          })),
+        });
+        created = result.count;
+      }
     }
     return { detected, created };
   }
