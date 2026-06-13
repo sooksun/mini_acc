@@ -24,8 +24,12 @@ const ACTIONS = [
   'RESET_BASELINE',
 ];
 
+const PAGE_SIZE = 50;
+
 export default function AuditLogPage() {
   const [rows, setRows] = useState<AuditRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [action, setAction] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,9 +40,11 @@ export default function AuditLogPage() {
     try {
       const params = new URLSearchParams();
       if (action) params.set('action', action);
-      params.set('take', '200');
-      const data = await api<AuditRow[]>(`/audit-logs?${params.toString()}`);
-      setRows(data);
+      params.set('take', String(PAGE_SIZE));
+      params.set('skip', String(page * PAGE_SIZE));
+      const data = await api<{ items: AuditRow[]; total: number }>(`/audit-logs?${params.toString()}`);
+      setRows(data.items);
+      setTotal(data.total);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -46,7 +52,11 @@ export default function AuditLogPage() {
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [action]);
+  // Reset to the first page whenever the action filter changes.
+  useEffect(() => { setPage(0); }, [action]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [action, page]);
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <>
@@ -125,6 +135,31 @@ export default function AuditLogPage() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between text-[12.5px] text-text-soft">
+          <span>
+            {total > 0
+              ? `แสดง ${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} จาก ${total} รายการ`
+              : 'ไม่มีรายการ'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={loading || page === 0}
+              className="rounded-md border border-border bg-surface px-3 py-1.5 disabled:opacity-40"
+            >
+              ก่อนหน้า
+            </button>
+            <span className="tabular-nums">หน้า {page + 1} / {pageCount}</span>
+            <button
+              onClick={() => setPage((p) => (p + 1 < pageCount ? p + 1 : p))}
+              disabled={loading || page + 1 >= pageCount}
+              className="rounded-md border border-border bg-surface px-3 py-1.5 disabled:opacity-40"
+            >
+              ถัดไป
+            </button>
+          </div>
         </div>
       </div>
     </>

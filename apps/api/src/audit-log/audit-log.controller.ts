@@ -1,4 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { AuthUser } from '@hj/shared-types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -20,30 +21,41 @@ export class AuditLogController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('take') take?: string,
+    @Query('skip') skip?: string,
   ) {
-    const limit = Math.min(Number(take ?? 100), 500);
+    // Paginated, not a bare `take`-capped array: AuditLog is the fastest-growing
+    // table and previously the UI showed only the newest N rows with no way to
+    // page back — older history was silently unreachable.
+    const limit = Math.min(Math.max(Number(take ?? 50) || 50, 1), 200);
+    const offset = Math.max(Number(skip ?? 0) || 0, 0);
 
-    const rows = await this.prisma.auditLog.findMany({
-      where: {
-        companyId: user.companyId,
-        ...(action ? { action } : {}),
-        ...(entityType ? { entityType } : {}),
-        ...(dateFrom || dateTo
-          ? {
-              createdAt: {
-                ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
-                ...(dateTo ? { lte: new Date(dateTo) } : {}),
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      include: {
-        user: { select: { id: true, fullName: true, email: true, role: true } },
-      },
-    });
+    const where: Prisma.AuditLogWhereInput = {
+      companyId: user.companyId,
+      ...(action ? { action } : {}),
+      ...(entityType ? { entityType } : {}),
+      ...(dateFrom || dateTo
+        ? {
+            createdAt: {
+              ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
+              ...(dateTo ? { lte: new Date(dateTo) } : {}),
+            },
+          }
+        : {}),
+    };
 
-    return rows;
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+        include: {
+          user: { select: { id: true, fullName: true, email: true, role: true } },
+        },
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+
+    return { items, total };
   }
 }

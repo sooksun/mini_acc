@@ -45,10 +45,13 @@ interface Candidate {
   daysOff: number;
 }
 
+const PAGE_SIZE = 50;
+
 export default function BankPage() {
   const toast = useToast();
   const [rows, setRows] = useState<BankLine[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'unmatched' | 'matched'>('unmatched');
   const [importOpen, setImportOpen] = useState(false);
@@ -62,7 +65,8 @@ export default function BankPage() {
     try {
       const params = new URLSearchParams();
       if (filter !== 'all') params.set('matchStatus', filter);
-      params.set('take', '500');
+      params.set('take', String(PAGE_SIZE));
+      params.set('skip', String(page * PAGE_SIZE));
       const result = await api<{ items: BankLine[]; total: number }>(
         `/bank/lines?${params.toString()}`,
       );
@@ -75,10 +79,14 @@ export default function BankPage() {
     }
   }
 
+  // Reset to the first page whenever the match filter changes.
+  useEffect(() => { setPage(0); }, [filter]);
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [filter, page]);
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   async function unmatch(line: BankLine) {
     if (!confirm('ยกเลิกการจับคู่กับ Payment นี้?')) return;
@@ -231,6 +239,31 @@ export default function BankPage() {
             emptyTitle="ไม่มีรายการ"
             emptyDescription={canImport ? 'กดปุ่ม "นำเข้า Statement" เพื่อเริ่มต้น' : undefined}
           />
+        </div>
+
+        <div className="mt-4 flex items-center justify-between text-[12.5px] text-text-soft">
+          <span>
+            {total > 0
+              ? `แสดง ${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, total)} จาก ${total} รายการ`
+              : 'ไม่มีรายการ'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={loading || page === 0}
+              className="rounded-md border border-border bg-surface px-3 py-1.5 disabled:opacity-40"
+            >
+              ก่อนหน้า
+            </button>
+            <span className="tabular-nums">หน้า {page + 1} / {pageCount}</span>
+            <button
+              onClick={() => setPage((p) => (p + 1 < pageCount ? p + 1 : p))}
+              disabled={loading || page + 1 >= pageCount}
+              className="rounded-md border border-border bg-surface px-3 py-1.5 disabled:opacity-40"
+            >
+              ถัดไป
+            </button>
+          </div>
         </div>
       </div>
 
