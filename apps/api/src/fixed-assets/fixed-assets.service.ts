@@ -7,6 +7,8 @@ import {
 import { Prisma } from '@prisma/client';
 import type { FixedAssetStatus } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
+import { JournalService } from '../journal/journal.service';
+import { ACCOUNTS } from '../journal/accounts';
 import { CreateFixedAssetDto } from './dto/create-asset.dto';
 import { DisposeAssetDto } from './dto/dispose-asset.dto';
 import { ListAssetsDto } from './dto/list-assets.dto';
@@ -15,7 +17,10 @@ const ZERO = new Prisma.Decimal(0);
 
 @Injectable()
 export class FixedAssetsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private journal: JournalService,
+  ) {}
 
   async create(companyId: string, _userId: string, dto: CreateFixedAssetDto) {
     const cost = new Prisma.Decimal(dto.cost);
@@ -122,28 +127,66 @@ export class FixedAssetsService {
    * straight-line: monthly = (cost − salvage) / usefulLifeMonths. Idempotent —
    * re-running the same period doesn't double-charge because we compute the
    * target accumulated value from `monthsElapsed`, not delta from previous run.
+   *
+   * Posts the period's depreciation to the journal so it reaches the P&L and
+   * the balance sheet: Dr ค่าเสื่อมราคา (5500) / Cr ค่าเสื่อมราคาสะสม (1490) for
+   * the aggregate delta. The asset-row updates and the journal entry share one
+   * transaction — they commit together or not at all. No delta → no entry, so
+   * an idempotent re-run posts nothing.
    */
-  async runDepreciation(companyId: string, asOf: Date = new Date()) {
+  async runDepreciation(companyId: string, userId: string, asOf: Date = new Date()) {
     const assets = await this.prisma.fixedAsset.findMany({
       where: { companyId, status: 'ACTIVE' },
     });
-    let updated = 0;
-    let totalDepreciation = ZERO;
 
+    // Compute deltas first (pure), then commit asset rows + journal atomically.
+    const charges: { id: string; newAccum: Prisma.Decimal; newBookValue: Prisma.Decimal; delta: Prisma.Decimal }[] = [];
+    let totalDepreciation = ZERO;
     for (const asset of assets) {
       const newAccum = this.computeAccumulated(asset, asOf);
       if (newAccum.equals(asset.accumulatedDepr)) continue;
-      const newBookValue = asset.cost.minus(newAccum);
-      await this.prisma.fixedAsset.update({
-        where: { id: asset.id },
-        data: { accumulatedDepr: newAccum, bookValue: newBookValue },
-      });
-      totalDepreciation = totalDepreciation.plus(newAccum.minus(asset.accumulatedDepr));
-      updated++;
+      const delta = newAccum.minus(asset.accumulatedDepr);
+      charges.push({ id: asset.id, newAccum, newBookValue: asset.cost.minus(newAccum), delta });
+      totalDepreciation = totalDepreciation.plus(delta);
     }
+
+    if (charges.length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        for (const c of charges) {
+          await tx.fixedAsset.update({
+            where: { id: c.id },
+            data: { accumulatedDepr: c.newAccum, bookValue: c.newBookValue },
+          });
+        }
+        // Only post when the aggregate delta is non-zero (rounding could in
+        // theory net to zero across assets, though each charge is > 0 here).
+        if (totalDepreciation.greaterThan(ZERO)) {
+          await this.journal.postWithTx(tx, {
+            companyId,
+            userId,
+            entryDate: asOf,
+            description: `ค่าเสื่อมราคา ณ ${asOf.toISOString().slice(0, 10)}`,
+            sourceType: 'FIXED_ASSET',
+            lines: [
+              {
+                accountCode: ACCOUNTS.DEPRECIATION_EXPENSE.code,
+                accountName: ACCOUNTS.DEPRECIATION_EXPENSE.name,
+                debit: totalDepreciation,
+              },
+              {
+                accountCode: ACCOUNTS.ACCUM_DEPRECIATION.code,
+                accountName: ACCOUNTS.ACCUM_DEPRECIATION.name,
+                credit: totalDepreciation,
+              },
+            ],
+          });
+        }
+      });
+    }
+
     return {
       asOf: asOf.toISOString(),
-      assetsUpdated: updated,
+      assetsUpdated: charges.length,
       totalDepreciation: totalDepreciation.toString(),
     };
   }

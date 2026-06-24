@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/Modal';
 import { VendorCategoryBadge, VENDOR_CATEGORY_OPTIONS } from '@/components/ui/VendorCategoryBadge';
 import { api } from '@/lib/api';
 import { useToast } from '@/components/ui/Toast';
+import { useRegisterPageDescriptor } from '@/contexts/AssistantContext';
 
 interface ContactInput {
   name: string;
@@ -95,6 +96,51 @@ export function PartnerForm({ open, onClose, onSaved, defaultType, partnerId }: 
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [open, partnerId, defaultType]);
+
+  const isVendor = defaultType === 'VENDOR';
+  useRegisterPageDescriptor(
+    () =>
+      !open
+        ? null
+        : {
+            route: isVendor ? '/vendors' : '/customers',
+            title: `${partnerId ? 'แก้ไข' : 'เพิ่ม'}${isVendor ? 'ผู้ขาย' : 'ลูกค้า'}`,
+            operation: partnerId ? 'edit' : 'create',
+            fields: [
+              { name: 'nameTh', label: 'ชื่อ (ไทย)', type: 'text', required: true },
+              { name: 'nameEn', label: 'ชื่อ (อังกฤษ)', type: 'text' },
+              { name: 'taxId', label: 'เลขผู้เสียภาษี (13 หลัก)', type: 'text', hint: 'ต้องมีหากออกใบกำกับภาษี' },
+              { name: 'branch', label: 'สาขา', type: 'text' },
+              { name: 'address', label: 'ที่อยู่', type: 'textarea' },
+              { name: 'phone', label: 'โทรศัพท์', type: 'text' },
+              { name: 'email', label: 'อีเมล', type: 'text' },
+              { name: 'defaultWhtRate', label: 'อัตราหัก ณ ที่จ่าย (%)', type: 'number' },
+            ],
+            getCurrentValues: () => ({
+              nameTh: form.nameTh,
+              nameEn: form.nameEn,
+              taxId: form.taxId,
+              branch: form.branch,
+              address: form.address,
+              phone: form.phone,
+              email: form.email,
+              defaultWhtRate: form.defaultWhtRate,
+            }),
+            applyValues: (p) =>
+              setForm((f) => ({
+                ...f,
+                ...(p.nameTh !== undefined ? { nameTh: String(p.nameTh) } : {}),
+                ...(p.nameEn !== undefined ? { nameEn: String(p.nameEn) } : {}),
+                ...(p.taxId !== undefined ? { taxId: String(p.taxId).replace(/\D/g, '').slice(0, 13) } : {}),
+                ...(p.branch !== undefined ? { branch: String(p.branch) } : {}),
+                ...(p.address !== undefined ? { address: String(p.address) } : {}),
+                ...(p.phone !== undefined ? { phone: String(p.phone) } : {}),
+                ...(p.email !== undefined ? { email: String(p.email) } : {}),
+                ...(p.defaultWhtRate !== undefined ? { defaultWhtRate: String(p.defaultWhtRate) } : {}),
+              })),
+          },
+    [open, partnerId, isVendor],
+  );
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

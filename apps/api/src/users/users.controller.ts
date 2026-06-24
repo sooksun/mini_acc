@@ -8,11 +8,26 @@ import { AuditAction } from '../audit-log/audit-log.decorator';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
   constructor(private users: UsersService) {}
+
+  // ---- Current user's own assistant preferences (any authenticated human) ----
+  // Declared before ':id' so /users/me/preferences never matches the :id route.
+  @Get('me/preferences')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER')
+  getMyPreferences(@CurrentUser() user: AuthUser) {
+    return this.users.getPreferences(user.id);
+  }
+
+  @Patch('me/preferences')
+  @Roles('OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER')
+  updateMyPreferences(@CurrentUser() user: AuthUser, @Body() dto: UpdatePreferencesDto) {
+    return this.users.updatePreferences(user.id, dto);
+  }
 
   @Get()
   @Roles('OWNER', 'ADMIN', 'ACCOUNTANT')

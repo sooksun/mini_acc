@@ -14,9 +14,10 @@ import { ReceiptTaxInvoicesController } from './receipt-tax-invoices.controller'
 import { ReceiptTaxInvoicesService } from './receipt-tax-invoices.service';
 import { TaxModule } from '../tax/tax.module';
 import { JournalModule } from '../journal/journal.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [TaxModule, JournalModule],
+  imports: [TaxModule, JournalModule, InventoryModule],
   controllers: [
     QuotationsController,
     InvoicesController,

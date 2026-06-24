@@ -24,6 +24,31 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
+  /** The current user's own AI-assistant preferences. */
+  async getPreferences(userId: string) {
+    const u = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { assistantEnabled: true, assistantAutoAdvice: true },
+    });
+    if (!u) throw new NotFoundException('User not found');
+    return { assistantEnabled: u.assistantEnabled, assistantAutoAdvice: u.assistantAutoAdvice };
+  }
+
+  async updatePreferences(
+    userId: string,
+    dto: { assistantEnabled?: boolean; assistantAutoAdvice?: boolean },
+  ) {
+    const data: Prisma.UserUpdateInput = {};
+    if (dto.assistantEnabled !== undefined) data.assistantEnabled = dto.assistantEnabled;
+    if (dto.assistantAutoAdvice !== undefined) data.assistantAutoAdvice = dto.assistantAutoAdvice;
+    const u = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+      select: { assistantEnabled: true, assistantAutoAdvice: true },
+    });
+    return { assistantEnabled: u.assistantEnabled, assistantAutoAdvice: u.assistantAutoAdvice };
+  }
+
   async listByCompany(companyId: string) {
     const users = await this.prisma.user.findMany({
       where: { companyId },

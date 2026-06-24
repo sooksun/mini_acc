@@ -3,23 +3,21 @@ import { Prisma } from '@prisma/client';
 import type { RiskItemType, RiskLevel, RiskItemStatus } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { ProjectsService } from '../projects/projects.service';
 import { ListRisksDto } from './dto/list-risks.dto';
 import { ResolveRiskDto } from './dto/resolve-risk.dto';
+import type { DetectedRisk } from './detected-risk';
+import { persistNewRisks } from './detectors/persist-new-risks';
+import { runRiskDetectors } from './detectors';
 
-export interface DetectedRisk {
-  type: RiskItemType;
-  level: RiskLevel;
-  entityType?: string;
-  entityId?: string;
-  title: string;
-  description?: string;
-}
+export type { DetectedRisk };
 
 @Injectable()
 export class RisksService {
   constructor(
     private prisma: PrismaService,
     private inventory: InventoryService,
+    private projects: ProjectsService,
   ) {}
 
   async list(companyId: string, dto: ListRisksDto) {
@@ -105,164 +103,13 @@ export class RisksService {
    * we trust the human's prior decision. Truly new findings become OPEN.
    */
   async scan(companyId: string): Promise<{ detected: DetectedRisk[]; created: number }> {
-    const detected: DetectedRisk[] = [];
-
-    // (1) TAX_INVOICE / RECEIPT_TAX_INVOICE confirmed but missing customer taxId
-    const docsMissingTaxId = await this.prisma.salesDocument.findMany({
-      where: {
-        companyId,
-        type: { in: ['TAX_INVOICE', 'RECEIPT_TAX_INVOICE'] },
-        status: { in: ['USER_CONFIRMED', 'ACCOUNTED', 'PENDING_ACCOUNTANT', 'ACCOUNTANT_APPROVED', 'LOCKED'] },
-        OR: [{ customerSnapshotTaxId: null }, { customerSnapshotTaxId: '' }],
-      },
-      select: { id: true, number: true, type: true, customerSnapshotName: true },
+    const detected = await runRiskDetectors({
+      companyId,
+      prisma: this.prisma,
+      inventory: this.inventory,
+      projects: this.projects,
     });
-    for (const doc of docsMissingTaxId) {
-      detected.push({
-        type: 'TAX_ID_MISSING',
-        level: 'CRITICAL',
-        entityType: 'SalesDocument',
-        entityId: doc.id,
-        title: `${doc.type === 'TAX_INVOICE' ? 'ใบกำกับภาษี' : 'ใบเสร็จ/ใบกำกับภาษี'} ${doc.number} ไม่มีเลขผู้เสียภาษีลูกค้า`,
-        description: `ลูกค้า "${doc.customerSnapshotName}" — เอกสารภาษีต้องมีเลขผู้เสียภาษี 13 หลักของผู้ซื้อ`,
-      });
-    }
-
-    // (2) Unbalanced journal entries (should never happen but defensive)
-    const unbalanced = await this.prisma.$queryRaw<
-      { id: string; entryDate: Date; totalDebit: string; totalCredit: string }[]
-    >`
-      SELECT id, entryDate, totalDebit, totalCredit
-      FROM JournalEntry
-      WHERE companyId = ${companyId}
-        AND status = 'POSTED'
-        AND totalDebit <> totalCredit
-    `;
-    for (const je of unbalanced) {
-      detected.push({
-        type: 'PDF_GENERATION_ERROR', // closest enum value; treat as system-integrity flag
-        level: 'CRITICAL',
-        entityType: 'JournalEntry',
-        entityId: je.id,
-        title: `Journal entry ${je.id} ไม่สมดุล: Dr ${je.totalDebit} ≠ Cr ${je.totalCredit}`,
-      });
-    }
-
-    // (3) ExpenseReceipt that hit ACCOUNTED but no matching journal (orphan record)
-    const orphanExpense = await this.prisma.$queryRaw<{ id: string; documentNumber: string | null }[]>`
-      SELECT er.id, er.documentNumber
-      FROM ExpenseRecord er
-      WHERE er.companyId = ${companyId}
-        AND er.status = 'RECORDED'
-        AND NOT EXISTS (
-          SELECT 1 FROM JournalEntry je
-          WHERE je.companyId = er.companyId
-            AND je.sourceType = 'EXPENSE_RECORD'
-            AND je.sourceId = er.id
-            AND je.status = 'POSTED'
-        )
-    `;
-    for (const er of orphanExpense) {
-      detected.push({
-        type: 'MISSING_DOCUMENT',
-        level: 'HIGH',
-        entityType: 'ExpenseRecord',
-        entityId: er.id,
-        title: `รายจ่าย ${er.documentNumber ?? er.id} ไม่มี journal entry`,
-        description: 'รายการลงรายจ่ายแล้วแต่ไม่พบ journal entry — ระบบ posting อาจมี bug',
-      });
-    }
-
-    // (4) Duplicate sales document numbers — the (companyId, type, number)
-    // unique key prevents same (type, number), so any real-numbered string that
-    // appears more than once is a data-integrity anomaly worth flagging.
-    const dupNumbers = await this.prisma.salesDocument.groupBy({
-      by: ['number'],
-      where: {
-        companyId,
-        status: { not: 'VOIDED' },
-        number: { not: { startsWith: 'DRAFT-' } },
-      },
-      _count: { number: true },
-      having: { number: { _count: { gt: 1 } } },
-    });
-    for (const dup of dupNumbers) {
-      detected.push({
-        type: 'DUPLICATE_DOCUMENT',
-        level: 'CRITICAL',
-        entityType: 'SalesDocumentNumber',
-        entityId: dup.number,
-        title: `เลขเอกสารขาย ${dup.number} ซ้ำ ${dup._count.number} ใบ`,
-        description: 'เลขเอกสารต้องไม่ซ้ำ — ตรวจสอบและออกเลขใหม่/ยกเลิกใบที่ซ้ำ',
-      });
-    }
-
-    // (5) Negative stock — the stock-out guard blocks OUT below zero, but
-    // ADJUST / opening balances can still push a product negative.
-    const stock = await this.inventory.stockSummary(companyId);
-    for (const s of stock) {
-      if (Number(s.onHand) < 0) {
-        detected.push({
-          type: 'STOCK_NEGATIVE',
-          level: 'CRITICAL',
-          entityType: 'Product',
-          entityId: s.productId,
-          title: `สินค้า ${s.nameTh} สต็อกติดลบ (${s.onHand} ${s.unit})`,
-          description: 'สต็อกติดลบ — ตรวจสอบการเคลื่อนไหวสินค้า/ยอดยกมา',
-        });
-      }
-    }
-
-    // Persist new findings. An existing row in ANY status (incl. RESOLVED /
-    // DISMISSED) is left untouched — we trust the human's prior decision.
-    //
-    // This used to be a per-risk findFirst+create (2 round-trips × N risks). On a
-    // messy month-end the detectors emit one risk per offending row, so a close
-    // screen that calls scan() on every load turned into dozens of sequential
-    // queries. Collapsed to two: one findMany to learn which keys already exist,
-    // one createMany for the genuinely-new ones.
-    const keyOf = (r: { type: string; entityType?: string | null; entityId?: string | null }) =>
-      `${r.type} ${r.entityType ?? ''} ${r.entityId ?? ''}`;
-
-    let created = 0;
-    if (detected.length > 0) {
-      const existing = await this.prisma.riskItem.findMany({
-        where: {
-          companyId,
-          OR: detected.map((r) => ({
-            type: r.type,
-            entityType: r.entityType ?? null,
-            entityId: r.entityId ?? null,
-          })),
-        },
-        select: { type: true, entityType: true, entityId: true },
-      });
-      const seen = new Set(existing.map(keyOf));
-
-      const fresh: DetectedRisk[] = [];
-      for (const risk of detected) {
-        const k = keyOf(risk);
-        if (seen.has(k)) continue;
-        seen.add(k); // also dedupes within this batch
-        fresh.push(risk);
-      }
-
-      if (fresh.length > 0) {
-        const result = await this.prisma.riskItem.createMany({
-          data: fresh.map((risk) => ({
-            companyId,
-            type: risk.type,
-            level: risk.level,
-            status: 'OPEN',
-            entityType: risk.entityType,
-            entityId: risk.entityId,
-            title: risk.title,
-            description: risk.description,
-          })),
-        });
-        created = result.count;
-      }
-    }
+    const created = await persistNewRisks(this.prisma, companyId, detected);
     return { detected, created };
   }
 

@@ -10,6 +10,7 @@ import { ThaiDatePicker } from '@/components/ui/ThaiDatePicker';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
+import { useRegisterPageDescriptor } from '@/contexts/AssistantContext';
 
 interface Project {
   id: string;
@@ -272,6 +273,54 @@ function ProjectFormModal({
       )
       .catch(() => setCustomers([]));
   }, [open, project]);
+
+  useRegisterPageDescriptor(
+    () =>
+      !open
+        ? null
+        : {
+            route: '/projects',
+            title: project ? 'แก้ไขโครงการ' : 'เพิ่มโครงการ',
+            operation: project ? 'edit' : 'create',
+            fields: [
+              { name: 'name', label: 'ชื่อโครงการ', type: 'text', required: true },
+              { name: 'code', label: 'รหัสโครงการ', type: 'text' },
+              {
+                name: 'status',
+                label: 'สถานะ',
+                type: 'select',
+                options: (Object.keys(STATUS_TH) as ProjectStatus[]).map((s) => ({ value: s, label: STATUS_TH[s] })),
+              },
+              { name: 'customerName', label: 'ลูกค้า', type: 'partner' },
+              { name: 'budget', label: 'งบประมาณ (บาท)', type: 'number' },
+              { name: 'startDate', label: 'วันเริ่ม', type: 'date' },
+              { name: 'endDate', label: 'วันสิ้นสุด', type: 'date' },
+              { name: 'note', label: 'หมายเหตุ', type: 'textarea' },
+            ],
+            getCurrentValues: () => ({
+              ...form,
+              customerName: customers.find((c) => c.id === form.customerId)?.nameTh ?? null,
+            }),
+            applyValues: (p) =>
+              setForm((f) => ({
+                ...f,
+                ...(p.name !== undefined ? { name: String(p.name) } : {}),
+                ...(p.code !== undefined ? { code: String(p.code) } : {}),
+                ...(typeof p.status === 'string' && p.status in STATUS_TH ? { status: p.status as ProjectStatus } : {}),
+                ...(p.budget !== undefined ? { budget: String(p.budget) } : {}),
+                ...(p.startDate !== undefined ? { startDate: String(p.startDate).slice(0, 10) } : {}),
+                ...(p.endDate !== undefined ? { endDate: String(p.endDate).slice(0, 10) } : {}),
+                ...(p.note !== undefined ? { note: String(p.note) } : {}),
+                ...(typeof p.customerName === 'string'
+                  ? (() => {
+                      const hit = customers.find((c) => c.nameTh === (p.customerName as string).trim());
+                      return hit ? { customerId: hit.id } : {};
+                    })()
+                  : {}),
+              })),
+          },
+    [open, project, customers.length],
+  );
 
   async function submit(e: FormEvent) {
     e.preventDefault();

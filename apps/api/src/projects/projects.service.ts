@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { DocumentType, Prisma } from '@prisma/client';
 import type { DocumentStatus } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -127,6 +127,62 @@ export class ProjectsService {
    * tagged with this project. Amounts are ex-VAT (subtotal); gross figures
    * carry VAT for cash-flow context.
    */
+  /**
+   * Ex-VAT revenue and cost per project — same recognition rules as profit().
+   * Used by the risk scanner (batch) and profit() (single project).
+   */
+  async profitTotalsBatch(
+    companyId: string,
+    projectIds: string[],
+  ): Promise<Map<string, { revenue: number; cost: number }>> {
+    if (projectIds.length === 0) return new Map();
+
+    const [invoiceRevs, receiptRevs, projCosts] = await Promise.all([
+      this.prisma.salesDocument.groupBy({
+        by: ['projectId'],
+        where: {
+          companyId,
+          projectId: { in: projectIds },
+          type: { in: ['INVOICE', 'TAX_INVOICE'] as DocumentType[] },
+          status: { in: CONFIRMED_SALES_STATUSES },
+        },
+        _sum: { subtotal: true },
+      }),
+      this.prisma.salesDocument.groupBy({
+        by: ['projectId'],
+        where: {
+          companyId,
+          projectId: { in: projectIds },
+          type: { in: ['RECEIPT', 'RECEIPT_TAX_INVOICE'] as DocumentType[] },
+          parentDocumentId: null,
+          status: { in: CONFIRMED_SALES_STATUSES },
+        },
+        _sum: { subtotal: true },
+      }),
+      this.prisma.expenseRecord.groupBy({
+        by: ['projectId'],
+        where: { companyId, projectId: { in: projectIds }, status: 'RECORDED' },
+        _sum: { subtotal: true },
+      }),
+    ]);
+
+    const totals = new Map<string, { revenue: number; cost: number }>();
+    for (const id of projectIds) {
+      totals.set(id, { revenue: 0, cost: 0 });
+    }
+    for (const row of [...invoiceRevs, ...receiptRevs]) {
+      if (!row.projectId) continue;
+      const cur = totals.get(row.projectId)!;
+      cur.revenue += Number(row._sum?.subtotal ?? 0);
+    }
+    for (const row of projCosts) {
+      if (!row.projectId) continue;
+      const cur = totals.get(row.projectId)!;
+      cur.cost += Number(row._sum?.subtotal ?? 0);
+    }
+    return totals;
+  }
+
   async profit(companyId: string, id: string) {
     const project = await this.findOne(companyId, id);
 

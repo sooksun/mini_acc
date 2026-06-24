@@ -29,6 +29,9 @@ import { HealthModule } from './health/health.module';
 import { ReportsModule } from './reports/reports.module';
 import { SystemModule } from './system/system.module';
 import { FromReceiptsModule } from './sales/from-receipts/from-receipts.module';
+import { ChartAccountsModule } from './chart-accounts/chart-accounts.module';
+import { YearEndClosingModule } from './year-end-closing/year-end-closing.module';
+import { AssistantModule } from './assistant/assistant.module';
 
 @Module({
   imports: [
@@ -63,6 +66,9 @@ import { FromReceiptsModule } from './sales/from-receipts/from-receipts.module';
     ReportsModule,
     SystemModule,
     FromReceiptsModule,
+    ChartAccountsModule,
+    YearEndClosingModule,
+    AssistantModule,
   ],
   providers: [
     {

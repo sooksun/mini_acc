@@ -13,6 +13,9 @@ import { getBuddhistYear } from '../../numbering/be-year';
 import { validateTransition } from '../../lifecycle/validate-transition';
 import { VatService } from '../../tax/vat.service';
 import { JournalService } from '../../journal/journal.service';
+import { InventoryService } from '../../inventory/inventory.service';
+import { recognisesRevenue } from './sales-revenue.util';
+import { shouldPostStockOutOnConfirm } from './sales-stock.util';
 import { ACCOUNTS, AccountRef } from '../../journal/accounts';
 import {
   CreateSalesDocumentInput,
@@ -29,6 +32,7 @@ export class SalesDocumentService {
     private numbering: NumberingService,
     private vat: VatService,
     private journal: JournalService,
+    private inventory: InventoryService,
   ) {}
 
   /** Validate that a projectId (if given) belongs to the company. */
@@ -292,6 +296,10 @@ export class SalesDocumentService {
       // revenue-recognition documents post — see postRevenueJournal.
       await this.postRevenueJournal(tx, updated, companyId, userId);
 
+      if (shouldPostStockOutOnConfirm(type, updated.parentDocumentId)) {
+        await this.postStockOutOnConfirm(tx, updated, companyId, userId);
+      }
+
       // Materialise the rest of the chain (DN/INV/RT|RC) as DRAFTs so the
       // operator can confirm each one as the real-world event happens.
       await this.createDownstreamDrafts(tx, updated, companyId, userId);
@@ -309,16 +317,69 @@ export class SalesDocumentService {
    * invoice already did); its cash is captured by the Payments module clearing
    * the receivable.
    */
-  private recognisesRevenue(doc: SalesDocument): boolean {
-    switch (doc.type) {
-      case 'INVOICE':
-      case 'TAX_INVOICE':
-        return true;
-      case 'RECEIPT':
-      case 'RECEIPT_TAX_INVOICE':
-        return doc.parentDocumentId === null;
-      default:
-        return false;
+  private docRecognisesRevenue(doc: SalesDocument): boolean {
+    return recognisesRevenue(doc.type, doc.parentDocumentId);
+  }
+
+  private async hasStockOutForProduct(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    productId: string,
+    doc: SalesDocument,
+  ): Promise<boolean> {
+    const refIds = [doc.id, doc.parentDocumentId].filter((id): id is string => !!id);
+    const existing = await tx.inventoryMovement.count({
+      where: {
+        companyId,
+        productId,
+        type: 'OUT',
+        referenceId: { in: refIds },
+        referenceType: {
+          in: ['DELIVERY_NOTE', 'INVOICE', 'TAX_INVOICE', 'RECEIPT', 'RECEIPT_TAX_INVOICE'],
+        },
+      },
+    });
+    return existing > 0;
+  }
+
+  private async postStockOutOnConfirm(
+    tx: Prisma.TransactionClient,
+    doc: SalesDocument & { items: SalesDocumentItem[] },
+    companyId: string,
+    userId: string,
+  ): Promise<void> {
+    const lineProductIds = [
+      ...new Set(
+        doc.items.map((i) => i.productId).filter((id): id is string => !!id),
+      ),
+    ];
+    if (lineProductIds.length === 0) return;
+
+    const products = await tx.product.findMany({
+      where: { companyId, id: { in: lineProductIds } },
+      select: { id: true, type: true },
+    });
+    const stockableIds = new Set(
+      products
+        .filter((p) => p.type === 'GOOD' || p.type === 'MATERIAL')
+        .map((p) => p.id),
+    );
+
+    for (const item of doc.items) {
+      if (!item.productId || !stockableIds.has(item.productId)) continue;
+
+      if (await this.hasStockOutForProduct(tx, companyId, item.productId, doc)) continue;
+
+      await this.inventory.stockOutWithTx(tx, {
+        companyId,
+        userId,
+        productId: item.productId,
+        quantity: item.quantity.toString(),
+        movementDate: doc.documentDate,
+        referenceType: doc.type,
+        referenceId: doc.id,
+        note: `ขาย ${doc.number}`,
+      });
     }
   }
 
@@ -346,7 +407,7 @@ export class SalesDocumentService {
     companyId: string,
     userId: string,
   ): Promise<void> {
-    if (!this.recognisesRevenue(doc)) return;
+    if (!this.docRecognisesRevenue(doc)) return;
 
     const isCash = doc.type === 'RECEIPT' || doc.type === 'RECEIPT_TAX_INVOICE';
     const revenueAccount = await this.resolveRevenueAccount(tx, doc.items);
@@ -456,7 +517,7 @@ export class SalesDocumentService {
 
     let posted = 0;
     for (const doc of docs) {
-      if (!this.recognisesRevenue(doc)) continue;
+      if (!this.docRecognisesRevenue(doc)) continue;
       const existing = await this.prisma.journalEntry.count({
         where: { companyId, sourceType: 'SALES_DOCUMENT', sourceId: doc.id, status: 'POSTED' },
       });

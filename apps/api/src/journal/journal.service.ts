@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import type { JournalSourceType } from '@hj/shared-types';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListJournalDto } from './dto/list-journal.dto';
+import { journalBalanceMismatch } from './journal-balance';
 
 export interface JournalLineInput {
   accountCode: string;
@@ -78,13 +79,14 @@ export class JournalService {
       (sum, line) => sum.plus(toDecimal(line.credit)),
       ZERO,
     );
-    if (!totalDebit.equals(totalCredit)) {
+    const mismatch = journalBalanceMismatch(input.lines);
+    if (mismatch) {
       throw new UnprocessableEntityException({
         statusCode: 422,
         code: 'JOURNAL_UNBALANCED',
-        message: `Journal entry not balanced: Dr ${totalDebit.toString()} ≠ Cr ${totalCredit.toString()}`,
-        totalDebit: totalDebit.toString(),
-        totalCredit: totalCredit.toString(),
+        message: `Journal entry not balanced: Dr ${mismatch.totalDebit.toString()} ≠ Cr ${mismatch.totalCredit.toString()}`,
+        totalDebit: mismatch.totalDebit.toString(),
+        totalCredit: mismatch.totalCredit.toString(),
       });
     }
     // Note: a zero-total case is unreachable here — the per-line check above

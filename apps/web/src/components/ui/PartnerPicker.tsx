@@ -3,22 +3,13 @@
 import { useEffect, useState } from 'react';
 import type { PartnerType } from '@hj/shared-types';
 import { api } from '@/lib/api';
+import type { PartnerOption } from '@/lib/master-data-types';
 import { Spinner } from './Spinner';
-
-interface Partner {
-  id: string;
-  code: string | null;
-  nameTh: string;
-  taxId: string | null;
-  type: PartnerType;
-  address: string | null;
-  defaultWhtRate?: string | null;
-}
 
 interface PartnerPickerProps {
   type: PartnerType;
-  value: Partner | null;
-  onChange: (p: Partner | null) => void;
+  value: PartnerOption | null;
+  onChange: (p: PartnerOption | null) => void;
   placeholder?: string;
   requireTaxId?: boolean;
 }
@@ -26,7 +17,7 @@ interface PartnerPickerProps {
 export function PartnerPicker({ type, value, onChange, placeholder, requireTaxId }: PartnerPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [items, setItems] = useState<Partner[]>([]);
+  const [items, setItems] = useState<PartnerOption[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -39,7 +30,7 @@ export function PartnerPicker({ type, value, onChange, placeholder, requireTaxId
         params.set('isActive', 'true');
         if (search) params.set('search', search);
         params.set('take', '50');
-        const res = await api<{ items: Partner[] }>(`/partners?${params.toString()}`);
+        const res = await api<{ items: PartnerOption[] }>(`/partners?${params.toString()}`);
         setItems(res.items);
       } catch {
         setItems([]);

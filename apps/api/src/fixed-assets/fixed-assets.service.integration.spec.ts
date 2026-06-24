@@ -113,7 +113,7 @@ describe('FixedAssetsService (integration)', () => {
         usefulLifeMonths: 60,
       });
       // monthly = 12000/60 = 200; 12 months → 2400
-      const result = await service.runDepreciation(env.seed.companyId);
+      const result = await service.runDepreciation(env.seed.companyId, env.seed.userId);
       expect(result.assetsUpdated).toBeGreaterThan(0);
       const refreshed = await service.findOne(env.seed.companyId, asset.id);
       expect(Number(refreshed.accumulatedDepr)).toBeGreaterThan(0);
@@ -131,7 +131,7 @@ describe('FixedAssetsService (integration)', () => {
         salvageValue: '1000',
         usefulLifeMonths: 12,
       });
-      await service.runDepreciation(env.seed.companyId);
+      await service.runDepreciation(env.seed.companyId, env.seed.userId);
       const refreshed = await service.findOne(env.seed.companyId, asset.id);
       // Max depreciation = cost − salvage = 11000
       expect(Number(refreshed.accumulatedDepr)).toBeLessThanOrEqual(11000);
@@ -139,10 +139,44 @@ describe('FixedAssetsService (integration)', () => {
     });
 
     it('idempotent — re-running same period does not double-charge', async () => {
-      const before = await service.runDepreciation(env.seed.companyId);
-      const after = await service.runDepreciation(env.seed.companyId);
+      const before = await service.runDepreciation(env.seed.companyId, env.seed.userId);
+      const after = await service.runDepreciation(env.seed.companyId, env.seed.userId);
       // No new updates between back-to-back runs (same asOf within milliseconds)
       expect(after.assetsUpdated).toBe(0);
+    });
+
+    it('posts a balanced journal entry Dr 5500 / Cr 1490 for the depreciation charge', async () => {
+      const asset = await service.create(env.seed.companyId, env.seed.userId, {
+        code: 'DEPR-JE',
+        name: 'Asset that books depreciation',
+        category: 'office',
+        acquiredAt: new Date(Date.now() - 6 * 30 * 24 * 60 * 60 * 1000).toISOString(),
+        cost: '24000',
+        usefulLifeMonths: 24, // monthly = 1000
+      });
+      const result = await service.runDepreciation(env.seed.companyId, env.seed.userId);
+      expect(Number(result.totalDepreciation)).toBeGreaterThan(0);
+
+      // A FIXED_ASSET journal entry must exist, balanced, hitting 5500 and 1490.
+      const entry = await env.prisma.journalEntry.findFirst({
+        where: { companyId: env.seed.companyId, sourceType: 'FIXED_ASSET', status: 'POSTED' },
+        orderBy: { createdAt: 'desc' },
+        include: { lines: true },
+      });
+      expect(entry).toBeTruthy();
+      expect(Number(entry!.totalDebit)).toBe(Number(entry!.totalCredit));
+      const dr = entry!.lines.find((l) => l.accountCode === '5500');
+      const cr = entry!.lines.find((l) => l.accountCode === '1490');
+      expect(Number(dr?.debit)).toBeGreaterThan(0);
+      expect(Number(cr?.credit)).toBeGreaterThan(0);
+      expect(Number(dr?.debit)).toBe(Number(cr?.credit));
+      // The journal charge equals exactly what runDepreciation reported.
+      expect(Number(dr?.debit)).toBe(Number(result.totalDepreciation));
+
+      // The new asset depreciates in whole monthly steps of 1000 (24000 / 24).
+      const refreshed = await service.findOne(env.seed.companyId, asset.id);
+      expect(Number(refreshed.accumulatedDepr)).toBeGreaterThan(0);
+      expect(Number(refreshed.accumulatedDepr) % 1000).toBe(0);
     });
 
     it('skips DISPOSED assets', async () => {
@@ -158,7 +192,7 @@ describe('FixedAssetsService (integration)', () => {
         reason: 'sold',
       });
       const before = await service.findOne(env.seed.companyId, asset.id);
-      await service.runDepreciation(env.seed.companyId);
+      await service.runDepreciation(env.seed.companyId, env.seed.userId);
       const after = await service.findOne(env.seed.companyId, asset.id);
       expect(after.accumulatedDepr).toBe(before.accumulatedDepr);
     });

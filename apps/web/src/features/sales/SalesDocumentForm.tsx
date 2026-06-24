@@ -10,8 +10,10 @@ import { ProductPicker } from '@/components/ui/ProductPicker';
 import { Money } from '@/components/ui/Money';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
+import type { PartnerOption, ProductOption } from '@/lib/master-data-types';
 import { computeTotals, lineTotal } from '@/lib/quotation-totals';
 import { formatThaiDate, localDateString, numberToThaiBahtText } from '@/lib/format';
+import { useRegisterPageDescriptor } from '@/contexts/AssistantContext';
 import type { ProductType } from '@hj/shared-types';
 import type { DocTypeMeta } from './doc-type-meta';
 
@@ -79,14 +81,16 @@ export function SalesDocumentForm({
   const toast = useToast();
   const mode: 'create' | 'edit' = initial ? 'edit' : 'create';
 
-  const [customer, setCustomer] = useState<any>(
+  const [customer, setCustomer] = useState<PartnerOption | null>(
     initial
       ? {
           id: initial.customer.id,
+          code: null,
           nameTh: initial.customer.nameTh,
           address: initial.customer.address,
           taxId: initial.customer.taxId,
           branch: initial.customer.branch,
+          type: 'CUSTOMER',
         }
       : null,
   );
@@ -128,6 +132,91 @@ export function SalesDocumentForm({
       .then((c) => setCompany({ vatEffectiveDate: c.vatEffectiveDate }))
       .catch(() => setCompany(null));
   }, [meta.requireCustomerTaxId]);
+
+  // ---- AI assistant: read + fill this sales document form ------------------
+  // customer/product stay advisory-by-name (the assistant proposes a name; the
+  // user resolves the real row via the picker, preserving the taxId/VAT guards).
+  useRegisterPageDescriptor(
+    () => ({
+      route: meta.listHref,
+      title: `${mode === 'edit' ? 'แก้ไข' : 'สร้าง'}${meta.shortTitle}`,
+      operation: mode === 'edit' ? 'edit' : 'create',
+      fields: [
+        { name: 'customerName', label: 'ชื่อลูกค้า', type: 'partner', required: true, hint: 'บอกชื่อ ผมจะลองจับคู่ให้ ถ้าไม่ตรงคุณเลือกเองได้' },
+        { name: 'documentDate', label: 'วันที่เอกสาร', type: 'date', required: true },
+        { name: 'dueDate', label: 'ครบกำหนดชำระ', type: 'date' },
+        { name: 'reference', label: 'อ้างอิง', type: 'text' },
+        { name: 'note', label: 'หมายเหตุ', type: 'textarea' },
+        ...(projects.length
+          ? [{
+              name: 'projectId',
+              label: 'โครงการ',
+              type: 'select' as const,
+              options: projects.map((p) => ({ value: p.id, label: p.code ? `${p.code} ${p.name}` : p.name })),
+            }]
+          : []),
+        { name: 'vatRate', label: 'อัตรา VAT (%)', type: 'number' },
+        { name: 'whtRate', label: 'อัตราหัก ณ ที่จ่าย (%)', type: 'number' },
+        { name: 'items', label: 'รายการสินค้า/บริการ', type: 'items', required: true, hint: 'แต่ละรายการ: description, quantity, unitPrice, unit' },
+      ],
+      getCurrentValues: () => ({
+        customerName: customer?.nameTh ?? null,
+        documentDate,
+        dueDate,
+        reference,
+        note,
+        projectId,
+        vatRate,
+        whtRate,
+        items: items.map((it) => ({
+          description: it.description,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          unit: it.unit,
+        })),
+      }),
+      applyValues: (p) => {
+        if (p.documentDate !== undefined) setDocumentDate(String(p.documentDate).slice(0, 10));
+        if (p.dueDate !== undefined) setDueDate(String(p.dueDate).slice(0, 10));
+        if (p.reference !== undefined) setReference(String(p.reference));
+        if (p.note !== undefined) setNote(String(p.note));
+        if (p.vatRate !== undefined && isFinite(Number(p.vatRate))) setVatRate(Number(p.vatRate));
+        if (p.whtRate !== undefined && isFinite(Number(p.whtRate))) setWhtRate(Number(p.whtRate));
+        if (p.projectId !== undefined) {
+          const key = String(p.projectId);
+          const proj = projects.find((pr) => pr.id === key || pr.name === key || pr.code === key);
+          if (proj) setProjectId(proj.id);
+        }
+        if (Array.isArray(p.items)) {
+          const rows = (p.items as Array<Record<string, unknown>>)
+            .map((it) => ({
+              ...emptyRow(),
+              description: String(it.description ?? '').trim(),
+              unit: it.unit ? String(it.unit) : 'รายการ',
+              quantity: Number(it.quantity) > 0 ? Number(it.quantity) : 1,
+              unitPrice: isFinite(Number(it.unitPrice)) ? Number(it.unitPrice) : 0,
+            }))
+            .filter((r) => r.description);
+          if (rows.length) setItems(rows);
+        }
+        // Advisory customer match: only auto-select on a single exact-name hit.
+        if (typeof p.customerName === 'string' && p.customerName.trim() && !customer) {
+          const name = p.customerName.trim();
+          api<{ items: PartnerOption[] }>(
+            `/partners?type=CUSTOMER&search=${encodeURIComponent(name)}`,
+          )
+            .then((res) => {
+              const exact = res.items.filter((x) => x.nameTh === name);
+              if (exact.length === 1) {
+                setCustomer(exact[0]!);
+              }
+            })
+            .catch(() => undefined);
+        }
+      },
+    }),
+    [meta.listHref, mode, projects.length],
+  );
 
   useEffect(() => {
     api<{ items: { id: string; name: string; code: string | null }[] }>('/projects?take=200')
@@ -191,7 +280,7 @@ export function SalesDocumentForm({
   function updateRow(idx: number, patch: Partial<ItemRow>) {
     setItems((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  function applyProduct(idx: number, p: any) {
+  function applyProduct(idx: number, p: ProductOption) {
     updateRow(idx, {
       productId: p.id,
       productCode: p.code ?? undefined,
@@ -202,7 +291,7 @@ export function SalesDocumentForm({
       vatable: p.vatable,
     });
   }
-  function applyCustomer(c: any) {
+  function applyCustomer(c: PartnerOption | null) {
     setCustomer(c);
     // The customer's configured default WHT takes priority over the
     // SERVICE-based auto-suggestion. Apply it immediately on selection.
@@ -273,8 +362,8 @@ export function SalesDocumentForm({
         toast.success(`สร้าง${meta.shortTitle}แล้ว (DRAFT)`);
         router.push(`${meta.listHref}/${created.id}` as any);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ');
     } finally {
       setSubmitting(false);
     }

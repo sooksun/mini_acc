@@ -4,21 +4,11 @@ import { FormEvent, useEffect, useMemo, useRef, useState, KeyboardEvent } from '
 import type { ProductType } from '@hj/shared-types';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
+import type { ProductOption } from '@/lib/master-data-types';
 import { Modal } from './Modal';
 import { ProductTypeBadge } from './ProductTypeBadge';
 import { Spinner } from './Spinner';
 import { useToast } from './Toast';
-
-interface Product {
-  id: string;
-  code: string | null;
-  nameTh: string;
-  type: ProductType;
-  unit: string;
-  unitPrice: string;
-  vatable: boolean;
-  description: string | null;
-}
 
 type TypeFilter = '' | ProductType;
 const TYPE_FILTERS: Array<{ value: TypeFilter; label: string }> = [
@@ -34,14 +24,14 @@ export function ProductPicker({
   onChange,
   placeholder,
 }: {
-  value: Product | null;
-  onChange: (p: Product | null) => void;
+  value: ProductOption | null;
+  onChange: (p: ProductOption | null) => void;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('');
-  const [items, setItems] = useState<Product[]>([]);
+  const [items, setItems] = useState<ProductOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -61,7 +51,7 @@ export function ProductPicker({
         if (search) params.set('search', search);
         if (typeFilter) params.set('type', typeFilter);
         params.set('take', '100');
-        const res = await api<{ items: Product[] }>(`/products?${params.toString()}`);
+        const res = await api<{ items: ProductOption[] }>(`/products?${params.toString()}`);
         setItems(res.items);
         setHighlightIdx(0);
       } catch {
@@ -90,7 +80,7 @@ export function ProductPicker({
     el?.scrollIntoView({ block: 'nearest' });
   }, [highlightIdx]);
 
-  function handleCreated(p: Product) {
+  function handleCreated(p: ProductOption) {
     onChange(p);
     setCreateOpen(false);
     setOpen(false);
@@ -359,7 +349,7 @@ function CreateProductModal({
   defaultName?: string;
   defaultType?: ProductType;
   onClose: () => void;
-  onCreated: (p: Product) => void;
+  onCreated: (p: ProductOption) => void;
 }) {
   const toast = useToast();
   const [form, setForm] = useState<CreateForm>({
@@ -406,7 +396,7 @@ function CreateProductModal({
     }
     setSaving(true);
     try {
-      const created = await api<Product>('/products', {
+      const created = await api<ProductOption>('/products', {
         method: 'POST',
         body: JSON.stringify({
           type: form.type,

@@ -1,9 +1,14 @@
+import type { DocumentType } from '@hj/shared-types';
+import { DeliveryNotesService } from './delivery-notes.service';
 import { InvoicesService } from './invoices.service';
 import { ReceiptsService } from './receipts.service';
 import { ReceiptTaxInvoicesService } from './receipt-tax-invoices.service';
 import { QuotationsService } from './quotations.service';
+import { TaxInvoicesService } from './tax-invoices.service';
 import { SalesDocumentService } from './_shared/sales-document.service';
 import { PaymentsService } from '../payments/payments.service';
+import { InventoryService } from '../inventory/inventory.service';
+import { journalBalanceMismatch } from '../journal/journal-balance';
 import {
   bootstrapTestEnv,
   teardownTestEnv,
@@ -50,6 +55,9 @@ describe('Sales document → journal posting (integration)', () => {
   let quotations: QuotationsService;
   let salesDoc: SalesDocumentService;
   let payments: PaymentsService;
+  let inventory: InventoryService;
+  let dnService: DeliveryNotesService;
+  let taxInvService: TaxInvoicesService;
 
   beforeAll(async () => {
     env = await bootstrapTestEnv();
@@ -59,6 +67,9 @@ describe('Sales document → journal posting (integration)', () => {
     quotations = env.app.get(QuotationsService);
     salesDoc = env.app.get(SalesDocumentService);
     payments = env.app.get(PaymentsService);
+    inventory = env.app.get(InventoryService);
+    dnService = env.app.get(DeliveryNotesService);
+    taxInvService = env.app.get(TaxInvoicesService);
   });
 
   afterAll(async () => {
@@ -246,5 +257,237 @@ describe('Sales document → journal posting (integration)', () => {
     const after = await salesDoc.findOne('INVOICE', env.seed.companyId, draft.id);
     expect(after.settlement.paid).toBe(false);
     expect(num(after.settlement.outstanding)).toBe(1070);
+  });
+
+  describe('GOOD confirm — stock OUT + revenue journal', () => {
+    async function seedGoodProduct(nameTh: string, stockQty: string) {
+      const good = await env.prisma.product.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'GOOD',
+          nameTh,
+          unit: 'ชิ้น',
+          unitPrice: '100',
+          vatable: true,
+        },
+      });
+      await env.prisma.inventoryMovement.create({
+        data: {
+          companyId: env.seed.companyId,
+          productId: good.id,
+          type: 'IN',
+          quantity: stockQty,
+          movementDate: new Date('2026-05-01'),
+        },
+      });
+      return good;
+    }
+
+    it.each<DocumentType>(['INVOICE', 'TAX_INVOICE'])(
+      '%s with GOOD posts balanced journal and stock OUT',
+      async (docType) => {
+        const good = await seedGoodProduct(`สินค้า ${docType}`, '12');
+        const createDto = {
+          customerId: env.seed.customerId,
+          documentDate: '2026-05-15',
+          vatRate: 7,
+          whtRate: 0,
+          items: [
+            {
+              productId: good.id,
+              description: `สินค้า ${docType}`,
+              unit: 'ชิ้น',
+              quantity: 4,
+              unitPrice: 100,
+              vatable: true,
+            },
+          ],
+        };
+
+        const draft =
+          docType === 'INVOICE'
+            ? await invoices.create(env.seed.companyId, env.seed.userId, createDto)
+            : await taxInvService.create(env.seed.companyId, env.seed.userId, createDto);
+
+        const confirmed =
+          docType === 'INVOICE'
+            ? await invoices.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id)
+            : await taxInvService.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id);
+
+        expect(confirmed.status).toBe('USER_CONFIRMED');
+
+        const entries = await salesEntry(env, confirmed.id);
+        expect(entries).toHaveLength(1);
+        const e = entries[0]!;
+        expect(e.totalDebit.toString()).toBe(e.totalCredit.toString());
+        expect(
+          journalBalanceMismatch(e.lines.map((l) => ({ debit: l.debit, credit: l.credit }))),
+        ).toBeNull();
+
+        const movement = await env.prisma.inventoryMovement.findFirst({
+          where: {
+            companyId: env.seed.companyId,
+            productId: good.id,
+            type: 'OUT',
+            referenceType: docType,
+            referenceId: confirmed.id,
+          },
+        });
+        expect(movement).not.toBeNull();
+        expect(movement!.quantity.toString()).toBe('4');
+        expect((await inventory.stockOnHand(env.seed.companyId, good.id)).toString()).toBe('8');
+      },
+    );
+
+    it('DELIVERY_NOTE with GOOD posts stock OUT only (no revenue journal)', async () => {
+      const good = await seedGoodProduct('สินค้า DN', '10');
+      const draft = await dnService.create(env.seed.companyId, env.seed.userId, {
+        customerId: env.seed.customerId,
+        documentDate: '2026-05-10',
+        vatRate: 7,
+        whtRate: 0,
+        items: [
+          {
+            productId: good.id,
+            description: 'สินค้า DN',
+            unit: 'ชิ้น',
+            quantity: 3,
+            unitPrice: 100,
+            vatable: true,
+          },
+        ],
+      });
+      const confirmed = await dnService.confirm(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        draft.id,
+      );
+      expect(await salesEntry(env, confirmed.id)).toHaveLength(0);
+      const movement = await env.prisma.inventoryMovement.findFirst({
+        where: {
+          companyId: env.seed.companyId,
+          productId: good.id,
+          type: 'OUT',
+          referenceType: 'DELIVERY_NOTE',
+          referenceId: confirmed.id,
+        },
+      });
+      expect(movement!.quantity.toString()).toBe('3');
+    });
+
+    it('standalone RECEIPT with GOOD posts balanced journal and stock OUT', async () => {
+      const good = await seedGoodProduct('สินค้าขายสด', '5');
+      const draft = await receipts.create(env.seed.companyId, env.seed.userId, {
+        customerId: env.seed.customerId,
+        documentDate: '2026-05-12',
+        vatRate: 7,
+        whtRate: 0,
+        items: [
+          {
+            productId: good.id,
+            description: 'สินค้าขายสด',
+            unit: 'ชิ้น',
+            quantity: 2,
+            unitPrice: 200,
+            vatable: true,
+          },
+        ],
+      });
+      const confirmed = await receipts.confirm(
+        env.seed.companyId,
+        env.seed.userId,
+        'OWNER',
+        draft.id,
+      );
+      const e = (await salesEntry(env, confirmed.id))[0]!;
+      expect(
+        journalBalanceMismatch(e.lines.map((l) => ({ debit: l.debit, credit: l.credit }))),
+      ).toBeNull();
+      const movement = await env.prisma.inventoryMovement.findFirst({
+        where: {
+          companyId: env.seed.companyId,
+          productId: good.id,
+          type: 'OUT',
+          referenceType: 'RECEIPT',
+          referenceId: confirmed.id,
+        },
+      });
+      expect(movement!.quantity.toString()).toBe('2');
+    });
+
+    it('rejects DN confirm when stock is insufficient', async () => {
+      const good = await env.prisma.product.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'GOOD',
+          nameTh: 'สินค้าสต็อกไม่พอ',
+          unit: 'ชิ้น',
+          unitPrice: '50',
+          vatable: true,
+        },
+      });
+      const draft = await dnService.create(env.seed.companyId, env.seed.userId, {
+        customerId: env.seed.customerId,
+        documentDate: '2026-05-11',
+        vatRate: 7,
+        whtRate: 0,
+        items: [
+          {
+            productId: good.id,
+            description: 'สินค้าสต็อกไม่พอ',
+            unit: 'ชิ้น',
+            quantity: 2,
+            unitPrice: 50,
+            vatable: true,
+          },
+        ],
+      });
+      await expect(
+        dnService.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'STOCK_NEGATIVE' }),
+      });
+    });
+
+    it('skips stock OUT for SERVICE line items on INVOICE confirm', async () => {
+      const service = await env.prisma.product.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'SERVICE',
+          nameTh: 'บริการไม่ตัดสต็อก',
+          unit: 'รายการ',
+          unitPrice: '500',
+          vatable: true,
+        },
+      });
+      const draft = await invoices.create(env.seed.companyId, env.seed.userId, {
+        customerId: env.seed.customerId,
+        documentDate: '2026-05-16',
+        vatRate: 7,
+        whtRate: 0,
+        items: [
+          {
+            productId: service.id,
+            description: 'บริการไม่ตัดสต็อก',
+            unit: 'รายการ',
+            quantity: 1,
+            unitPrice: 500,
+            vatable: true,
+          },
+        ],
+      });
+      await invoices.confirm(env.seed.companyId, env.seed.userId, 'OWNER', draft.id);
+      const movement = await env.prisma.inventoryMovement.findFirst({
+        where: {
+          companyId: env.seed.companyId,
+          productId: service.id,
+          type: 'OUT',
+          referenceType: 'INVOICE',
+          referenceId: draft.id,
+        },
+      });
+      expect(movement).toBeNull();
+    });
   });
 });

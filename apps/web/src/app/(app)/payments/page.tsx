@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
 import { formatThaiCurrency, formatThaiDateShort, localDateString } from '@/lib/format';
+import { useRegisterPageDescriptor } from '@/contexts/AssistantContext';
 
 interface PartnerLite {
   id: string;
@@ -298,6 +299,11 @@ function CreatePaymentModal({
   const [whtCertNumber, setWhtCertNumber] = useState('');
   const [whtCategory, setWhtCategory] = useState('');
   const [note, setNote] = useState('');
+  const [linkedInvoiceId, setLinkedInvoiceId] = useState('');
+  const [openInvoices, setOpenInvoices] = useState<
+    Array<{ id: string; number: string; grandTotal: string; type: string }>
+  >([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -313,12 +319,107 @@ function CreatePaymentModal({
       setWhtCertNumber('');
       setWhtCategory('');
       setNote('');
+      setLinkedInvoiceId('');
+      setOpenInvoices([]);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || direction !== 'IN' || !partner) {
+      setOpenInvoices([]);
+      setLinkedInvoiceId('');
+      return;
+    }
+    setLoadingInvoices(true);
+    const params = new URLSearchParams();
+    params.set('customerId', partner.id);
+    params.set('take', '50');
+    Promise.all([
+      api<{ items: Array<{ id: string; number: string; grandTotal: string }> }>(
+        `/sales/invoices?${params.toString()}`,
+      ),
+      api<{ items: Array<{ id: string; number: string; grandTotal: string }> }>(
+        `/sales/tax-invoices?${params.toString()}`,
+      ),
+    ])
+      .then(([inv, tax]) => {
+        const merged = [
+          ...inv.items.map((d) => ({ ...d, type: 'INVOICE' })),
+          ...tax.items.map((d) => ({ ...d, type: 'TAX_INVOICE' })),
+        ].filter((d) => !d.number.startsWith('DRAFT-'));
+        setOpenInvoices(merged);
+      })
+      .catch(() => setOpenInvoices([]))
+      .finally(() => setLoadingInvoices(false));
+  }, [open, direction, partner]);
 
   const amountNum = Number(amount) || 0;
   const whtNum = Number(whtAmount) || 0;
   const cashOut = Math.max(0, amountNum - whtNum);
+
+  useRegisterPageDescriptor(
+    () =>
+      !open
+        ? null
+        : {
+            route: '/payments',
+            title: 'บันทึกรับ/จ่ายเงิน',
+            operation: 'create',
+            fields: [
+              {
+                name: 'direction',
+                label: 'ทิศทาง',
+                type: 'select',
+                required: true,
+                options: [
+                  { value: 'IN', label: 'รับเงิน' },
+                  { value: 'OUT', label: 'จ่ายเงิน' },
+                ],
+              },
+              { name: 'partnerName', label: 'คู่ค้า', type: 'partner', required: true },
+              { name: 'paymentDate', label: 'วันที่', type: 'date', required: true },
+              { name: 'amount', label: 'จำนวนเงิน', type: 'number', required: true },
+              { name: 'whtAmount', label: 'หัก ณ ที่จ่าย', type: 'number' },
+              {
+                name: 'method',
+                label: 'วิธีจ่าย',
+                type: 'select',
+                options: Object.entries(METHOD_LABEL).map(([value, label]) => ({ value, label })),
+              },
+              { name: 'reference', label: 'อ้างอิง', type: 'text' },
+              { name: 'note', label: 'หมายเหตุ', type: 'textarea' },
+            ],
+            getCurrentValues: () => ({
+              direction,
+              partnerName: partner?.nameTh ?? null,
+              paymentDate,
+              amount,
+              whtAmount,
+              method,
+              reference,
+              note,
+            }),
+            applyValues: (p) => {
+              if (p.direction === 'IN' || p.direction === 'OUT') setDirection(p.direction);
+              if (p.paymentDate !== undefined) setPaymentDate(String(p.paymentDate).slice(0, 10));
+              if (p.amount !== undefined) setAmount(String(p.amount));
+              if (p.whtAmount !== undefined) setWhtAmount(String(p.whtAmount));
+              if (typeof p.method === 'string' && p.method in METHOD_LABEL) setMethod(p.method as PaymentMethod);
+              if (p.reference !== undefined) setReference(String(p.reference));
+              if (p.note !== undefined) setNote(String(p.note));
+              if (typeof p.partnerName === 'string' && p.partnerName.trim() && !partner) {
+                const name = p.partnerName.trim();
+                api<{ items: PartnerLite[] }>(`/partners?search=${encodeURIComponent(name)}`)
+                  .then((res) => {
+                    const exact = res.items.filter((x) => x.nameTh === name);
+                    if (exact.length === 1) setPartner(exact[0]!);
+                  })
+                  .catch(() => undefined);
+              }
+            },
+          },
+    [open],
+  );
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -346,6 +447,9 @@ function CreatePaymentModal({
           whtCertNumber: whtCertNumber.trim() || undefined,
           whtCategory: whtCategory.trim() || undefined,
           note: note.trim() || undefined,
+          ...(direction === 'IN' && linkedInvoiceId
+            ? { sourceType: 'SALES_DOCUMENT', sourceId: linkedInvoiceId }
+            : {}),
         }),
       });
       toast.success('บันทึกการชำระเงินแล้ว');
@@ -411,10 +515,39 @@ function CreatePaymentModal({
           <PartnerPicker
             type={direction === 'OUT' ? 'VENDOR' : 'CUSTOMER'}
             value={partner}
-            onChange={setPartner}
+            onChange={(p) => {
+              setPartner(p);
+              setLinkedInvoiceId('');
+            }}
             placeholder="ค้นหาและเลือก"
           />
         </label>
+
+        {direction === 'IN' && (
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-[12.5px] text-text-soft">
+              ผูกกับใบแจ้งหนี้ (ถ้ารับชำระลูกหนี้)
+            </span>
+            <select
+              value={linkedInvoiceId}
+              onChange={(e) => setLinkedInvoiceId(e.target.value)}
+              disabled={!partner || loadingInvoices}
+              className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-[13.5px] outline-none focus:border-brand disabled:opacity-60"
+            >
+              <option value="">— ไม่ผูกใบแจ้งหนี้ —</option>
+              {openInvoices.map((inv) => (
+                <option key={inv.id} value={inv.id}>
+                  {inv.number} · {formatThaiCurrency(inv.grandTotal)} บาท
+                </option>
+              ))}
+            </select>
+            {partner && !loadingInvoices && openInvoices.length === 0 && (
+              <p className="mt-1 text-[11.5px] text-text-mute">
+                ไม่พบใบแจ้งหนี้ของลูกค้านี้ — บันทึกรับเงินทั่วไปได้โดยไม่ผูก
+              </p>
+            )}
+          </label>
+        )}
 
         <label>
           <span className="mb-1 block text-[12.5px] text-text-soft">วันที่ชำระ</span>

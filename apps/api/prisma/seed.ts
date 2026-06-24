@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { seedChartAccounts } from '../src/journal/chart-accounts.seed';
 
 const prisma = new PrismaClient();
 
@@ -22,6 +23,9 @@ async function main() {
       capital: 1_000_000,
     },
   });
+
+  // System chart of accounts (idempotent upsert per company).
+  await seedChartAccounts(prisma, company.id);
 
   const existingVat = await prisma.companyVatStatus.findFirst({
     where: { companyId: company.id, effectiveFrom: new Date('2024-07-08T00:00:00+07:00') },

@@ -67,6 +67,6 @@ export class FixedAssetsController {
     }),
   })
   depreciate(@CurrentUser() user: AuthUser) {
-    return this.assets.runDepreciation(user.companyId);
+    return this.assets.runDepreciation(user.companyId, user.id);
   }
 }

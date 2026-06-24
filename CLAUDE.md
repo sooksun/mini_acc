@@ -172,7 +172,7 @@ The `AI_AGENT` role can read, extract, suggest, and flag risks. It **cannot** co
 
 ### Money & accounting integrity
 - Journal entries must satisfy `Dr === Cr` server-side; reject otherwise (`JournalService.postWithTx`).
-- Period close (`ClosingService`) is blocked by the PRD §17.4 hard-blocks — all computed directly (NOT via dismissable risks): journal unbalanced, open `CRITICAL` risk, duplicate sales doc numbers (`DUPLICATE_DOC_NUMBER`), negative stock (`STOCK_NEGATIVE`), unmatched bank lines in period (`UNMATCHED_BANK`), invoice received-but-no-receipt (`INVOICE_RECEIVED_NO_RECEIPT`, dormant until payments link to invoices). `close()` also bulk-locks the period's sales docs to `LOCKED` in one tx (the one sanctioned place that sets status without `validateTransition` — period authority, §15.4).
+- Period close (`ClosingService`) is blocked by the PRD §17.4 hard-blocks — all computed directly (NOT via dismissable risks): journal unbalanced, open `CRITICAL` risk, duplicate sales doc numbers (`DUPLICATE_DOC_NUMBER`), negative stock (`STOCK_NEGATIVE`), unmatched bank lines in period (`UNMATCHED_BANK`), invoice received-but-no-receipt (`INVOICE_RECEIVED_NO_RECEIPT`, when payments link to invoices via `sourceType`/`sourceId`). `close()` also bulk-locks the period's sales docs to `LOCKED` in one tx (the one sanctioned place that sets status without `validateTransition` — period authority, §15.4).
 - Project-cost expenses must carry a `projectId`. Stock-out movements must validate available stock.
 
 ### Sales & ledger (Journal is the source of truth — PRD §7.2)

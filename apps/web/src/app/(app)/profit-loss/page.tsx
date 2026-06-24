@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { AppTopbar } from '@/components/AppTopbar';
 import { StatCard } from '@/components/ui/StatCard';
 import { api } from '@/lib/api';
-import { formatThaiCurrency } from '@/lib/format';
+import { YEARS, rangeMonthOptions as MONTH_OPTIONS, thb } from '@/lib/report-filters';
 
 // ---- Types -----------------------------------------------------------------
 
@@ -46,29 +46,6 @@ interface ProfitLossSummary {
 }
 
 // ---- Helpers ---------------------------------------------------------------
-
-const CURRENT_CE_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 7 }, (_, i) => CURRENT_CE_YEAR - 2 + i);
-
-const MONTH_OPTIONS = [
-  { value: 'all', label: 'ทั้งปี' },
-  { value: '1', label: 'มกราคม' },
-  { value: '2', label: 'กุมภาพันธ์' },
-  { value: '3', label: 'มีนาคม' },
-  { value: '4', label: 'เมษายน' },
-  { value: '5', label: 'พฤษภาคม' },
-  { value: '6', label: 'มิถุนายน' },
-  { value: '7', label: 'กรกฎาคม' },
-  { value: '8', label: 'สิงหาคม' },
-  { value: '9', label: 'กันยายน' },
-  { value: '10', label: 'ตุลาคม' },
-  { value: '11', label: 'พฤศจิกายน' },
-  { value: '12', label: 'ธันวาคม' },
-];
-
-function thb(n: number) {
-  return formatThaiCurrency(n);
-}
 
 function pct(n: number) {
   return `${n >= 0 ? '' : ''}${n.toFixed(1)}%`;

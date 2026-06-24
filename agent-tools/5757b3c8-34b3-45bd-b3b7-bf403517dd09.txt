@@ -1,0 +1,339 @@
+
+> @hj/api@0.0.1 test:integration D:\laragon\www\mini_acc\apps\api
+> dotenv -e .env.test -- jest --runInBand --testPathPattern=integration "--testPathPattern=(closing.service|delivery-note-stock)"
+
+node.exe : PASS src/sales/delivery-note-stock.integration.spec.ts (11.015 s)
+At C:\Users\ASUS\AppData\Roaming\npm\pnpm.ps1:24 char:5
++     & "node$exe"  "$basedir/node_modules/pnpm/bin/pnpm.mjs" $args
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (PASS src/sales/...c.ts (11.015 s):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+FAIL src/tax/wht-pdf.service.integration.spec.ts (7.51 s)
+  ● WhtPdfService (integration) › renderCertificate (50 ทวิ) › renders a 3-page PDF for a PAYABLE WHT 
+record (juristic vendor → �.ง.ด.53)
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/tax/wht-pdf.service.integration.spec.ts:57:7)
+  ● WhtPdfService (integration) › renderCertificate (50 ทวิ) › renders single-page PDF when copies = 
+[ORIGINAL]
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/tax/wht-pdf.service.integration.spec.ts:69:7)
+  ● WhtPdfService (integration) › renderCertificate (50 ทวิ) › refuses certificate for RECEIVABLE record 
+(vendor withheld from us, we don't issue cert)
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/tax/wht-pdf.service.integration.spec.ts:90:23)
+  ● WhtPdfService (integration) › renderPndSummary (monthly attachment) › PND53 filter only includes 
+juristic-tax-id partners (leading 0)
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/tax/wht-pdf.service.integration.spec.ts:116:7)
+  ● WhtPdfService (integration) › periodSplit › returns count + totals split by inferred form type
+    expect(received).toBeGreaterThan(expected)
+    Expected: > 0
+    Received:   0
+      162 |     it('returns count + totals split by inferred form type', async () => {
+      163 |       const split = await service.periodSplit(env.seed.companyId, 2026, 8);
+    > 164 |       expect(split.pnd3.count).toBeGreaterThan(0);
+          |                                ^
+      165 |       expect(split.pnd53.count).toBeGreaterThan(0);
+      166 |       // PAYABLE records only — RECEIVABLE shouldn't show up
+      167 |       // We had 1 PND53 vendor (0123...11), 2 PND3 (1123...12, 1123...22) and 1 PND53 (0123...21)
+      at Object.<anonymous> (src/tax/wht-pdf.service.integration.spec.ts:164:32)
+  ● WhtPdfService (integration) › PND54 (foreign payments) › includes only FOREIGN_WHT records and excludes them 
+from �.ง.ด.3/53
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/tax/wht-pdf.service.integration.spec.ts:207:7)
+PASS src/risks/risks.service.integration.spec.ts
+PASS src/accountant-pack/accountant-pack.service.integration.spec.ts
+FAIL src/expense-receipts/expense-receipts.service.integration.spec.ts
+  ● ExpenseReceiptsService (integration) › state machine — C3 transitions › ACCOUNTED → reject() is rejected 
+with InvalidExpenseTransitionError (422)
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/expense-receipts/expense-receipts.service.ts:664:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at ExpenseReceiptsService.account (src/expense-receipts/expense-receipts.service.ts:590:21)
+      at Object.<anonymous> (src/expense-receipts/expense-receipts.service.integration.spec.ts:160:7)
+  ● ExpenseReceiptsService (integration) › account() — H4 amount + date guards › accepts when documentDate is 
+set even without paidAt
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecim
+
+... (output truncated) ...
+
+> 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/bank/bank.service.integration.spec.ts:159:23)
+  ● BankService (integration) › manual match / unmatch › refuses to match a line twice
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/bank/bank.service.integration.spec.ts:188:23)
+  ● BankService (integration) › manual match / unmatch › unmatch frees the line + makes payment available for 
+re-match
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/bank/bank.service.integration.spec.ts:210:23)
+  ● BankService (integration) › candidatesForLine › returns payments within window, ranked by amount + date 
+proximity
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/payments/payments.service.ts:162:26
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/bank/bank.service.integration.spec.ts:242:7)
+FAIL src/projects/projects.service.integration.spec.ts
+  ● ProjectsService (integration) › computes profit = revenue (tagged sales) − cost (tagged expenses)
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at SalesDocumentService.postRevenueJournal (src/sales/_shared/sales-document.service.ts:428:24)
+      at src/sales/_shared/sales-document.service.ts:296:7
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8000)
+      at Object.<anonymous> (src/projects/projects.service.integration.spec.ts:67:5)
+FAIL src/reports/reports.coa-tieout.integration.spec.ts
+  ● Reports tie-out across a custom non-prefix account (integration) › P&L counts the custom 6000 COGS account as 
+expense (not dropped)
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/journal/journal.service.ts:125:50
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8006)
+      at Object.<anonymous> (src/reports/reports.coa-tieout.integration.spec.ts:30:5)
+  ● Reports tie-out across a custom non-prefix account (integration) › P&L profit equals the balance-sheet 
+current-period earnings
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/journal/journal.service.ts:125:50
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8006)
+      at Object.<anonymous> (src/reports/reports.coa-tieout.integration.spec.ts:30:5)
+  ● Reports tie-out across a custom non-prefix account (integration) › the custom account shows under its chart 
+name + type on the trial balance
+    [DecimalError] Invalid argument: undefined
+      10 | function toDecimal(v: string | number | Prisma.Decimal): Prisma.Decimal {
+      11 |   if (v instanceof Prisma.Decimal) return v;
+    > 12 |   return new Prisma.Decimal(v);
+         |          ^
+      13 | }
+      14 |
+      15 | /** Sum debits and credits; returns null when balanced, otherwise the mismatch totals. */
+      at new i 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:21:31836)
+      at toDecimal (src/journal/journal-balance.ts:12:10)
+      at src/journal/journal-balance.ts:19:59
+          at Array.reduce (<anonymous>)
+      at journalBalanceMismatch (src/journal/journal-balance.ts:19:28)
+      at JournalService.postWithTx (src/journal/journal.service.ts:74:44)
+      at src/journal/journal.service.ts:125:50
+      at Proxy._transactionWithCallback 
+(../../node_modules/.pnpm/@prisma+client@5.22.0_prisma@5.22.0/node_modules/@prisma/client/runtime/library.js:130:8006)
+      at Object.<anonymous> (src/reports/reports.coa-tieout.integration.spec.ts:30:5)
+Test Suites: 16 failed, 11 passed, 27 total
+Tests:       87 failed, 120 passed, 207 total
+Snapshots:   0 total
+Time:        69.624 s
+Ran all test suites matching /integration|(closing.service|delivery-note-stock)/i.

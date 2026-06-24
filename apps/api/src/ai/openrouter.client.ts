@@ -110,6 +110,13 @@ export interface ReceiptItemsExtractionResult {
   mocked: boolean;
 }
 
+export interface ChatResult {
+  content: string;
+  model: string;
+  /** True when the result is the canned fallback (no API key / disabled / failure). */
+  mocked: boolean;
+}
+
 /**
  * Thin wrapper around OpenRouter chat-completion API. We deliberately keep it
  * minimal — only what the AI Inbox needs today (document field extraction).
@@ -356,6 +363,82 @@ ${(opts.text ?? '(no text extracted)').slice(0, 8000)}`;
         `openrouter.extractItems.failed fileName=${opts.fileName} model=${model} durationMs=${Date.now() - startedAt} reason=${reason} — falling back to mock`,
       );
       return this.mockReceiptItems(model);
+    }
+  }
+
+  /**
+   * Generic chat completion — the transport for the floating-panel assistant.
+   * Reuses the same fetch / timeout / fallback contract as the extractors but
+   * stays schema-agnostic: it returns the raw assistant `content`, and the
+   * caller (AssistantService) owns parsing + key-whitelisting.
+   *
+   * Kill switch is `ASSISTANT_DISABLED` (separate from the AI-Inbox egress flag
+   * `AI_INBOX_DISABLED`). No key / disabled / failure → the caller-supplied
+   * `mockReply` (or a safe default), `mocked: true`, no network call.
+   */
+  async chat(opts: {
+    system: string;
+    messages: { role: 'user' | 'assistant'; content: string }[];
+    json?: boolean;
+    mockReply?: string;
+  }): Promise<ChatResult> {
+    const apiKey = this.config.get<string>('OPENROUTER_API_KEY');
+    const model =
+      this.config.get<string>('OPENROUTER_MODEL_EXTRACT') ?? 'anthropic/claude-sonnet-4';
+    const timeoutMs = Number(this.config.get<string>('OPENROUTER_TIMEOUT_MS') ?? 30_000);
+    const disabled = this.config.get<string>('ASSISTANT_DISABLED') === '1';
+    const fallback =
+      opts.mockReply ??
+      (opts.json
+        ? '{"action":"ask","message":"ผู้ช่วยยังไม่พร้อมใช้งานในขณะนี้"}'
+        : 'ผู้ช่วยยังไม่พร้อมใช้งานในขณะนี้');
+
+    if (disabled || !apiKey) {
+      this.logger.log(
+        `openrouter.chat.skipped reason=${disabled ? 'disabled' : 'no_api_key'} msgs=${opts.messages.length}`,
+      );
+      return { content: fallback, model: `${model} (mock)`, mocked: true };
+    }
+
+    const startedAt = Date.now();
+    this.logger.log(
+      `openrouter.chat.start model=${model} msgs=${opts.messages.length} json=${opts.json ? 1 : 0} timeoutMs=${timeoutMs}`,
+    );
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'system', content: opts.system }, ...opts.messages],
+          temperature: 0,
+          ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`OpenRouter ${res.status}: ${body.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error('OpenRouter returned no content');
+      this.logger.log(
+        `openrouter.chat.done model=${model} durationMs=${Date.now() - startedAt} chars=${content.length}`,
+      );
+      return { content, model, mocked: false };
+    } catch (err) {
+      const isTimeout =
+        err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      const reason = isTimeout
+        ? `timed_out_${timeoutMs}ms`
+        : err instanceof Error
+          ? err.message
+          : String(err);
+      this.logger.warn(
+        `openrouter.chat.failed model=${model} durationMs=${Date.now() - startedAt} reason=${reason} — falling back to mock`,
+      );
+      return { content: fallback, model: `${model} (mock)`, mocked: true };
     }
   }
 

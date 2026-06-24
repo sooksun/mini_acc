@@ -38,12 +38,17 @@ Thumbs.db
 coverage
 .nyc_output
 
-var/attachments
-var/test-attachments
-var/generated_pdfs
-var/pdf-samples
+# Runtime / local output (attachments, PDFs, manual screenshots, smoke reports)
+var/
 # api ephemeral output (test attachments, generated/sample PDFs)
 apps/api/var/
+
+# Cursor MCP tool descriptors — local IDE config, not part of the app
+mcps/
+
+# Dev-only manual QA / E2E loop scripts (not shipped with the product)
+apps/api/scripts/manual-*.ts
+apps/api/scripts/e2e-smoke-loop.ts
 storage/
 *.tsbuildinfo
 

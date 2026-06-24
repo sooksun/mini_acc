@@ -8,6 +8,8 @@ import th from 'antd/locale/th_TH';
 import { ToastContainer } from 'react-toastify';
 import { AppSidebar } from '@/components/AppSidebar';
 import { getUser, getToken } from '@/lib/auth';
+import { AssistantProvider } from '@/contexts/AssistantContext';
+import { AssistantPanel } from '@/components/assistant/AssistantPanel';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -56,10 +58,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           theme="light"
           style={{ zIndex: 9999 }}
         />
-        <div className="grid min-h-screen grid-cols-[248px_1fr]">
-          <AppSidebar user={user} />
-          <main className="flex min-w-0 flex-col">{children}</main>
-        </div>
+        <AssistantProvider>
+          <div className="grid min-h-screen grid-cols-[248px_1fr]">
+            <AppSidebar user={user} />
+            <main className="flex min-w-0 flex-col">{children}</main>
+          </div>
+          <AssistantPanel />
+        </AssistantProvider>
       </AntdApp>
     </ConfigProvider>
   );

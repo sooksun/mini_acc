@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { seedChartAccounts } from '../src/journal/chart-accounts.seed';
 
 export interface TestSeed {
   companyId: string;
@@ -47,13 +48,35 @@ const TABLES_FK_DEPENDENT_ORDER = [
   'Product',
   'DocumentNumberingCounter',
   'DocumentNumberingRule',
+  'ChartAccount',
   'AuditLog',
   'CompanyVatStatus',
   'User',
   'Company',
 ];
 
+/**
+ * SAFETY: integration tests TRUNCATE the database. They must only ever run
+ * against a dedicated test DB. If DATABASE_URL doesn't name a *_test database,
+ * we throw before touching any data — this is what stops a bare `jest` run
+ * (which falls back to the root .env → the DEV database via Nest's ConfigModule)
+ * from wiping real data. Always run integration tests via
+ * `pnpm --filter @hj/api test:integration`, which sets `-e .env.test`.
+ */
+export function assertTestDatabase(): void {
+  const url = process.env.DATABASE_URL ?? '';
+  if (!/_test(\?|$|")/i.test(url) && !/test/i.test(url)) {
+    const safe = url.replace(/:[^:@/]*@/, ':***@');
+    throw new Error(
+      `Refusing to run integration tests against a non-test database. ` +
+        `DATABASE_URL must target a *_test database (got: "${safe}"). ` +
+        `Use "pnpm --filter @hj/api test:integration" instead of bare jest.`,
+    );
+  }
+}
+
 export async function createTestApp(): Promise<{ app: INestApplication; prisma: PrismaService }> {
+  assertTestDatabase();
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
@@ -65,6 +88,7 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
 }
 
 export async function truncateAll(prisma: PrismaService): Promise<void> {
+  assertTestDatabase();
   await prisma.$executeRawUnsafe('SET FOREIGN_KEY_CHECKS = 0');
   for (const table of TABLES_FK_DEPENDENT_ORDER) {
     await prisma.$executeRawUnsafe(`DELETE FROM \`${table}\``);
@@ -88,6 +112,8 @@ export async function seedMinimum(
           : opts.vatEffectiveDate ?? new Date('2024-07-08T00:00:00+07:00'),
     },
   });
+
+  await seedChartAccounts(prisma, company.id);
 
   const user = await prisma.user.create({
     data: {

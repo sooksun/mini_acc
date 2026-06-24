@@ -166,8 +166,24 @@ export const JournalSourceType = {
   FIXED_ASSET: 'FIXED_ASSET',
   MANUAL: 'MANUAL',
   ADJUSTMENT: 'ADJUSTMENT',
+  CLOSING: 'CLOSING',
 } as const;
 export type JournalSourceType = (typeof JournalSourceType)[keyof typeof JournalSourceType];
+
+export const AccountType = {
+  ASSET: 'ASSET',
+  LIABILITY: 'LIABILITY',
+  EQUITY: 'EQUITY',
+  REVENUE: 'REVENUE',
+  EXPENSE: 'EXPENSE',
+} as const;
+export type AccountType = (typeof AccountType)[keyof typeof AccountType];
+
+export const NormalBalance = {
+  DEBIT: 'DEBIT',
+  CREDIT: 'CREDIT',
+} as const;
+export type NormalBalance = (typeof NormalBalance)[keyof typeof NormalBalance];
 
 export const JournalEntryStatus = {
   DRAFT: 'DRAFT',
@@ -208,6 +224,7 @@ export const RiskItemType = {
   EDIT_AFTER_CONFIRM: 'EDIT_AFTER_CONFIRM',
   TAX_ID_MISSING: 'TAX_ID_MISSING',
   PDF_GENERATION_ERROR: 'PDF_GENERATION_ERROR',
+  JOURNAL_UNBALANCED: 'JOURNAL_UNBALANCED',
 } as const;
 export type RiskItemType = (typeof RiskItemType)[keyof typeof RiskItemType];
 
@@ -322,6 +339,7 @@ export const AuditAction = {
   AI_ACCEPT_SUGGESTION: 'AI_ACCEPT_SUGGESTION',
   AI_REJECT_SUGGESTION: 'AI_REJECT_SUGGESTION',
   AI_DELETE_SUGGESTION: 'AI_DELETE_SUGGESTION',
+  AI_ASSISTANT_FILL: 'AI_ASSISTANT_FILL',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 
@@ -354,3 +372,75 @@ export interface CompanyDto {
   capital: string | null;
   defaultMarkupPercent: number;
 }
+
+// ---- AI floating-panel assistant -------------------------------------------
+// Shared contract between the web panel and the api AssistantModule. The panel
+// describes the current page (a structured form schema + current values + a
+// capped text snapshot); the api returns either a clarifying question (`ask`)
+// or values to fill into the page's form (`fill`). There is deliberately NO
+// submit/confirm/save action — the AI never mutates; the user clicks Save.
+
+export const AssistantFieldType = {
+  text: 'text',
+  number: 'number',
+  date: 'date',
+  select: 'select',
+  partner: 'partner', // a customer/vendor — assistant proposes a NAME, user resolves via picker
+  product: 'product', // a catalog item — proposes a NAME
+  items: 'items', // a line-item array
+  textarea: 'textarea',
+  checkbox: 'checkbox',
+} as const;
+export type AssistantFieldType = (typeof AssistantFieldType)[keyof typeof AssistantFieldType];
+
+export interface AssistantSelectOption {
+  value: string;
+  label: string;
+}
+
+export interface AssistantFieldSchema {
+  name: string;
+  label: string;
+  type: AssistantFieldType;
+  required?: boolean;
+  options?: AssistantSelectOption[];
+  hint?: string;
+}
+
+/** CRUD intent of the page. Drives advice behaviour: only 'edit' (Update) reads
+ *  the screen + current values and asks the LLM for tailored advice; create/read/
+ *  delete use pre-designed static guidance with no screen read. */
+export type AssistantOperation = 'create' | 'read' | 'edit' | 'delete';
+
+export interface AssistantPageContext {
+  route: string;
+  title: string;
+  fields: AssistantFieldSchema[];
+  currentValues: Record<string, unknown>;
+  listEmpty?: boolean;
+  /** Capped innerText of the page's main content (no input values, no keystrokes). */
+  screenText?: string;
+  /** The page's CRUD intent — 'edit' triggers contextual (screen-reading) advice. */
+  mode?: AssistantOperation;
+  /** Pre-designed route guidance from the web client (`route-descriptions.ts`).
+   *  Used as the mock fallback when OpenRouter is unavailable — single source
+   *  of truth stays client-side; the API does not duplicate route copy. */
+  staticAdvice?: string;
+}
+
+export interface AssistantChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** What the assistant can return. No save/submit variant — by design. */
+export type AssistantAction =
+  | { action: 'ask'; message: string }
+  | { action: 'fill'; message: string; values: Record<string, unknown> };
+
+export interface AssistantPageAdviceResponse {
+  message: string;
+  mocked: boolean;
+}
+
+export type AssistantChatResponse = AssistantAction & { mocked: boolean };

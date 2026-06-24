@@ -136,6 +136,20 @@ enum JournalSourceType {
   FIXED_ASSET
   MANUAL
   ADJUSTMENT
+  CLOSING
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
 }
 
 enum JournalEntryStatus {
@@ -206,6 +220,7 @@ enum RiskItemType {
   EDIT_AFTER_CONFIRM
   TAX_ID_MISSING
   PDF_GENERATION_ERROR
+  JOURNAL_UNBALANCED
 }
 
 enum RiskItemStatus {
@@ -302,9 +317,36 @@ model Company {
   foreignTaxObligations ForeignTaxObligation[]
   prepaidScheduleEntries PrepaidScheduleEntry[]
   exportBatches      ExportBatch[]
+  chartAccounts      ChartAccount[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Per-company chart of accounts. System accounts (isSystem) are seeded from the
+/// hard-coded ACCOUNTS constant that automated posting uses and cannot be
+/// deleted; users may add their own accounts and rename/deactivate any account.
+/// Reports resolve account name + type from this table (falling back to the
+/// constant, then the code) so additions and renames flow through to the trial
+/// balance, balance sheet, and general ledger.
+model ChartAccount {
+  id            String        @id @default(cuid())
+  companyId     String
+  code          String        @db.VarChar(20)
+  name          String        @db.VarChar(120)
+  type          AccountType
+  normalBalance NormalBalance
+  isSystem      Boolean       @default(false)
+  isActive      Boolean       @default(true)
+  note          String?       @db.Text
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId, type])
 }
 
 model CompanyVatStatus {
@@ -331,6 +373,10 @@ model User {
   initial      String?
   role         Role
   isActive     Boolean @default(true)
+
+  // AI floating-panel assistant preferences (per-user, synced across devices).
+  assistantEnabled    Boolean @default(true)
+  assistantAutoAdvice Boolean @default(true)
 
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   auditLogs AuditLog[]

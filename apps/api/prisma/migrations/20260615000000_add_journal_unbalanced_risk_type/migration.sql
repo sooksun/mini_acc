@@ -1,0 +1,21 @@
+-- AlterEnum
+ALTER TABLE `RiskItem` MODIFY `type` ENUM(
+  'MISSING_DOCUMENT',
+  'DUPLICATE_DOCUMENT',
+  'VAT_RISK',
+  'WHT_RISK',
+  'UNMATCHED_BANK',
+  'LOW_PROFIT_PROJECT',
+  'STOCK_NEGATIVE',
+  'EXPENSE_WITHOUT_APPROVAL',
+  'EDIT_AFTER_CONFIRM',
+  'TAX_ID_MISSING',
+  'PDF_GENERATION_ERROR',
+  'JOURNAL_UNBALANCED'
+) NOT NULL;
+
+-- Backfill: journal imbalance was previously mis-tagged as PDF_GENERATION_ERROR
+UPDATE `RiskItem`
+SET `type` = 'JOURNAL_UNBALANCED'
+WHERE `type` = 'PDF_GENERATION_ERROR'
+  AND `entityType` = 'JournalEntry';

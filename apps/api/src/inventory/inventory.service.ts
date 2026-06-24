@@ -115,6 +115,70 @@ export class InventoryService {
     return this.computeStockOnHand(this.prisma, companyId, productId);
   }
 
+  /**
+   * Record a stock OUT inside a caller transaction (e.g. sales DN confirm).
+   * Enforces the same stock guard as create().
+   */
+  async stockOutWithTx(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      userId: string;
+      productId: string;
+      quantity: string;
+      movementDate: Date;
+      referenceType?: string;
+      referenceId?: string;
+      note?: string;
+    },
+  ) {
+    const quantity = new Prisma.Decimal(input.quantity);
+    if (quantity.lte(0)) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'QUANTITY_REQUIRED',
+        message: 'quantity ต้องมากกว่า 0',
+      });
+    }
+
+    const product = await tx.product.findFirst({
+      where: { id: input.productId, companyId: input.companyId, isActive: true },
+      select: { id: true, nameTh: true, unit: true, type: true },
+    });
+    if (!product) {
+      throw new NotFoundException('Product not found or inactive');
+    }
+    if (product.type !== 'GOOD' && product.type !== 'MATERIAL') {
+      return null;
+    }
+
+    await tx.$executeRaw`SELECT id FROM Product WHERE id = ${input.productId} FOR UPDATE`;
+    const currentStock = await this.computeStockOnHand(tx, input.companyId, input.productId);
+    if (currentStock.lt(quantity)) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        code: 'STOCK_NEGATIVE',
+        message: `สต็อกไม่พอ: ${product.nameTh} ปัจจุบัน ${currentStock.toString()} ${product.unit} ต้องการ ${quantity.toString()} ${product.unit}`,
+        currentStock: currentStock.toString(),
+        requested: quantity.toString(),
+      });
+    }
+
+    return tx.inventoryMovement.create({
+      data: {
+        companyId: input.companyId,
+        productId: input.productId,
+        type: 'OUT',
+        quantity,
+        movementDate: input.movementDate,
+        referenceType: input.referenceType?.trim() || null,
+        referenceId: input.referenceId?.trim() || null,
+        note: input.note?.trim() || null,
+        recordedBy: input.userId,
+      },
+    });
+  }
+
   async stockSummary(companyId: string) {
     // One row per product with its current on-hand quantity. We sum IN-type
     // movements then subtract OUT-type movements via two grouped aggregates,

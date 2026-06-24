@@ -102,10 +102,14 @@ body {
 [data-theme="dark"] .text-text-mute  { color: #9889cf !important; }
 [data-theme="dark"] .text-text-faint { color: #776aa8 !important; }
 
-/* Browser UA stylesheets sometimes break the `body { color }` inheritance
-   chain on table cells, so cells without an explicit text-* class render
-   in the OS default (near-black on dark bg = invisible). Force the
-   primary text color on bare tbody td elements as a safety net. */
-[data-theme="dark"] tbody td:not([class*="text-"]) {
+/* Browser UA stylesheets break `body { color }` inheritance on table cells,
+   form elements, and buttons — they get OS default (near-black on dark bg).
+   Setting color on the container elements lets explicit .text-text-soft etc.
+   (which carry !important) still override correctly. */
+[data-theme="dark"] table,
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea,
+[data-theme="dark"] button {
   color: #dccfff;
 }

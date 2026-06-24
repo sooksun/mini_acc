@@ -5,6 +5,7 @@ import type { ProductType } from '@hj/shared-types';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
+import { useRegisterPageDescriptor } from '@/contexts/AssistantContext';
 
 interface FormState {
   type: ProductType;
@@ -72,6 +73,54 @@ export function ProductForm({
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [open, productId]);
+
+  // Let the AI assistant read + fill this form while the modal is open.
+  useRegisterPageDescriptor(
+    () =>
+      !open
+        ? null
+        : {
+            route: '/products',
+            title: productId ? 'แก้ไขสินค้า/บริการ' : 'เพิ่มสินค้า/บริการ',
+            operation: productId ? 'edit' : 'create',
+            fields: [
+              {
+                name: 'type',
+                label: 'ประเภท',
+                type: 'select',
+                options: [
+                  { value: 'SERVICE', label: 'บริการ' },
+                  { value: 'GOOD', label: 'สินค้า' },
+                  { value: 'MATERIAL', label: 'วัสดุ' },
+                  { value: 'ASSET', label: 'ทรัพย์สิน' },
+                ],
+              },
+              { name: 'code', label: 'รหัส', type: 'text' },
+              { name: 'unit', label: 'หน่วยนับ', type: 'text', required: true },
+              { name: 'nameTh', label: 'ชื่อภาษาไทย', type: 'text', required: true },
+              { name: 'nameEn', label: 'ชื่อภาษาอังกฤษ', type: 'text' },
+              { name: 'description', label: 'รายละเอียด', type: 'textarea' },
+              { name: 'unitPrice', label: 'ราคาต่อหน่วย (บาท)', type: 'number', required: true },
+              { name: 'vatable', label: 'คำนวณ VAT 7%', type: 'checkbox' },
+            ],
+            getCurrentValues: () => ({ ...form }),
+            applyValues: (p) =>
+              setForm((f) => ({
+                ...f,
+                ...(typeof p.type === 'string' && ['SERVICE', 'GOOD', 'MATERIAL', 'ASSET'].includes(p.type)
+                  ? { type: p.type as ProductType }
+                  : {}),
+                ...(p.code !== undefined ? { code: String(p.code) } : {}),
+                ...(p.unit !== undefined ? { unit: String(p.unit) } : {}),
+                ...(p.nameTh !== undefined ? { nameTh: String(p.nameTh) } : {}),
+                ...(p.nameEn !== undefined ? { nameEn: String(p.nameEn) } : {}),
+                ...(p.description !== undefined ? { description: String(p.description) } : {}),
+                ...(p.unitPrice !== undefined ? { unitPrice: String(p.unitPrice) } : {}),
+                ...(p.vatable !== undefined ? { vatable: Boolean(p.vatable) } : {}),
+              })),
+          },
+    [open, productId],
+  );
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

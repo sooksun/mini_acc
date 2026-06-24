@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import { getUser } from '@/lib/auth';
 import { formatThaiDateTime } from '@/lib/format';
+import { useRegisterPageDescriptor } from '@/contexts/AssistantContext';
 
 interface UserRow {
   id: string;
@@ -213,6 +214,32 @@ function CreateUserModal({
   useEffect(() => {
     if (open) setForm({ email: '', password: '', fullName: '', initial: '', role: 'ADMIN' });
   }, [open]);
+
+  // Assistant fills only non-sensitive fields — never email or password.
+  useRegisterPageDescriptor(
+    () =>
+      !open
+        ? null
+        : {
+            route: '/settings/users',
+            title: 'เพิ่มผู้ใช้',
+            operation: 'create',
+            fields: [
+              { name: 'fullName', label: 'ชื่อ-นามสกุล', type: 'text', required: true },
+              { name: 'initial', label: 'ตัวย่อ (1-3 ตัว)', type: 'text' },
+              { name: 'role', label: 'บทบาท', type: 'select', options: allowedRoleOptions.map((r) => ({ value: r, label: ROLE_LABEL[r] })) },
+            ],
+            getCurrentValues: () => ({ fullName: form.fullName, initial: form.initial, role: form.role }),
+            applyValues: (p) =>
+              setForm((v) => ({
+                ...v,
+                ...(p.fullName !== undefined ? { fullName: String(p.fullName) } : {}),
+                ...(p.initial !== undefined ? { initial: String(p.initial).slice(0, 3) } : {}),
+                ...(typeof p.role === 'string' && (allowedRoleOptions as string[]).includes(p.role) ? { role: p.role as Role } : {}),
+              })),
+          },
+    [open, allowedRoleOptions.length],
+  );
 
   async function submit(e: FormEvent) {
     e.preventDefault();

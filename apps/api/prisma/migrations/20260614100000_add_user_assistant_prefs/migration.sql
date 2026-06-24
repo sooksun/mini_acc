@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE `user` ADD COLUMN `assistantAutoAdvice` BOOLEAN NOT NULL DEFAULT true,
+    ADD COLUMN `assistantEnabled` BOOLEAN NOT NULL DEFAULT true;

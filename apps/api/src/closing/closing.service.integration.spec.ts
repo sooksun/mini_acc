@@ -193,6 +193,50 @@ describe('ClosingService (integration)', () => {
       expect(result.blockers.some((b) => b.code === 'UNMATCHED_BANK')).toBe(true);
     });
 
+    it('blocks close when invoice was paid but no receipt issued (INVOICE_RECEIVED_NO_RECEIPT)', async () => {
+      const invoice = await env.prisma.salesDocument.create({
+        data: {
+          companyId: env.seed.companyId,
+          type: 'INVOICE',
+          number: 'INV-2569-9901',
+          beYear: 2569,
+          status: 'USER_CONFIRMED',
+          customerId: env.seed.customerId,
+          documentDate: new Date(Date.UTC(2026, 2, 15)), // month 3
+          customerSnapshotName: 'ลูกค้าทดสอบ',
+          subtotal: '1000',
+          vatRate: '7',
+          vatAmount: '70',
+          totalAfterVat: '1070',
+          whtRate: '0',
+          whtAmount: '0',
+          grandTotal: '1070',
+          netReceived: '1070',
+          confirmedAt: new Date(),
+          confirmedBy: env.seed.userId,
+        },
+      });
+      await env.prisma.payment.create({
+        data: {
+          companyId: env.seed.companyId,
+          direction: 'IN',
+          partnerId: env.seed.customerId,
+          paymentDate: new Date(Date.UTC(2026, 2, 20)),
+          amount: '1070',
+          whtAmount: '0',
+          method: 'BANK_TRANSFER',
+          status: 'COMPLETED',
+          sourceType: 'SALES_DOCUMENT',
+          sourceId: invoice.id,
+          recordedBy: env.seed.userId,
+        },
+      });
+
+      const result = await service.checkPeriod(env.seed.companyId, 2026, 3);
+      expect(result.canClose).toBe(false);
+      expect(result.blockers.some((b) => b.code === 'INVOICE_RECEIVED_NO_RECEIPT')).toBe(true);
+    });
+
     it('blocks close on negative stock (company-wide)', async () => {
       const good = await env.prisma.product.create({
         data: {

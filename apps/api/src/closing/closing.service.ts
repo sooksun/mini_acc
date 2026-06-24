@@ -11,12 +11,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RisksService } from '../risks/risks.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { ClosePeriodDto, ReopenPeriodDto } from './dto/close-period.dto';
+import {
+  type CheckBlocker,
+  criticalRiskBlocker,
+  duplicateDocNumberBlocker,
+  invoiceReceivedNoReceiptBlocker,
+  journalUnbalancedBlocker,
+  stockNegativeBlocker,
+  unmatchedBankBlocker,
+} from './closing-blockers.util';
 
-export interface CheckBlocker {
-  code: string;
-  message: string;
-  count?: number;
-}
+export type { CheckBlocker };
 
 @Injectable()
 export class ClosingService {
@@ -66,24 +71,14 @@ export class ClosingService {
           AND totalDebit <> totalCredit
       `;
       const n = Number(raw[0]?.count ?? 0);
-      if (n > 0) {
-        blockers.push({
-          code: 'JOURNAL_UNBALANCED',
-          message: `Journal ${n} รายการในงวดยังไม่สมดุล`,
-          count: n,
-        });
-      }
+      const b = journalUnbalancedBlocker(n);
+      if (b) blockers.push(b);
     }
 
     // (b) Critical risks still open
     const criticalOpen = await this.risks.countOpen(companyId, 'CRITICAL');
-    if (criticalOpen > 0) {
-      blockers.push({
-        code: 'CRITICAL_RISK_OPEN',
-        message: `มีความเสี่ยงระดับ CRITICAL ${criticalOpen} รายการที่ยังไม่จัดการ`,
-        count: criticalOpen,
-      });
-    }
+    const criticalB = criticalRiskBlocker(criticalOpen);
+    if (criticalB) blockers.push(criticalB);
 
     // (c) Sales documents in period that are still DRAFT (numbering unallocated)
     const draftDocs = await this.prisma.salesDocument.count({
@@ -150,26 +145,16 @@ export class ClosingService {
       _count: { number: true },
       having: { number: { _count: { gt: 1 } } },
     });
-    if (dupNumberGroups.length > 0) {
-      blockers.push({
-        code: 'DUPLICATE_DOC_NUMBER',
-        message: `มีเลขเอกสารขายซ้ำในงวด ${dupNumberGroups.length} เลข`,
-        count: dupNumberGroups.length,
-      });
-    }
+    const dupB = duplicateDocNumberBlocker(dupNumberGroups.length);
+    if (dupB) blockers.push(dupB);
 
     // (f) PRD §17.4 — negative stock. The stock-out guard blocks OUT movements,
     // but ADJUST / opening balances can still drive a product below zero.
     // Company-wide (stock isn't period-scoped).
     const stock = await this.inventory.stockSummary(companyId);
     const negativeStock = stock.filter((s) => Number(s.onHand) < 0);
-    if (negativeStock.length > 0) {
-      blockers.push({
-        code: 'STOCK_NEGATIVE',
-        message: `มีสินค้าสต็อกติดลบ ${negativeStock.length} รายการ`,
-        count: negativeStock.length,
-      });
-    }
+    const stockB = stockNegativeBlocker(negativeStock.length);
+    if (stockB) blockers.push(stockB);
 
     // (g) PRD §17.4 — unmatched bank statement lines in the period: money moved
     // through the bank with no reconciled payment.
@@ -180,18 +165,12 @@ export class ClosingService {
         postedAt: { gte: periodStart, lt: periodEnd },
       },
     });
-    if (unmatchedBank > 0) {
-      blockers.push({
-        code: 'UNMATCHED_BANK',
-        message: `รายการธนาคารในงวดยังไม่จับคู่ ${unmatchedBank} รายการ`,
-        count: unmatchedBank,
-      });
-    }
+    const bankB = unmatchedBankBlocker(unmatchedBank);
+    if (bankB) blockers.push(bankB);
 
-    // (h) PRD §17.4 — invoice received (a payment was recorded against it) but
-    // no receipt issued. Driven by Payment→invoice linking (Payment.sourceId);
-    // until the UI records payments against invoices this stays dormant, which
-    // is correct — an unpaid open receivable must NOT block a period close.
+    // (h) PRD §17.4 — invoice received (payment linked via Payment.sourceType/
+    // sourceId, including /payments CreatePaymentModal) but no receipt issued.
+    // Unpaid open receivables without a payment link do NOT block period close.
     const paidInvoiceIds = (
       await this.prisma.payment.findMany({
         where: {
@@ -223,13 +202,8 @@ export class ClosingService {
           },
         },
       });
-      if (receivedNoReceipt > 0) {
-        blockers.push({
-          code: 'INVOICE_RECEIVED_NO_RECEIPT',
-          message: `ใบแจ้งหนี้รับเงินแล้วแต่ยังไม่ออกใบเสร็จ ${receivedNoReceipt} ใบ`,
-          count: receivedNoReceipt,
-        });
-      }
+      const invB = invoiceReceivedNoReceiptBlocker(receivedNoReceipt);
+      if (invB) blockers.push(invB);
     }
 
     // Period summary numbers
